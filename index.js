@@ -1,143 +1,172 @@
-// src/index.js
-const express = require('express');
-const { Pool } = require('pg');
-const cors = require('cors');
+// src/index.js — QUEEN STORE API IMORTAL (Cloudflare Tunnel + Railway + PM2)
 require('dotenv').config();
+const express = require('express');
+const { Client } = require('pg'); // Client = NUNCA MAIS ECONNRESET
 
 const app = express();
-
-// Middlewares
-app.use(cors({
-  origin: ['http://localhost:3000', 'https://queen-store.web.app'], // Permite front-end local e Firebase
-  credentials: true
-}));
 app.use(express.json());
 
-// Configuração do Pool do PostgreSQL
-const pool = new Pool({
-  host: process.env.DB_HOST || '127.0.0.1',        // Cloud SQL Proxy
-  port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  max: 20,                                        // Máximo de conexões
-  idleTimeoutMillis: 30000,                       // Fecha conexões ociosas
-  connectionTimeoutMillis: 2000,                  // Timeout de conexão
+// CORS FORÇADO — CLOUDFLARE NÃO TEM COMO BLOQUEAR
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'https://queen-store-476215.web.app',
+    'https://queen-store.web.app'
+  ];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session-id');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
 });
 
-// Teste de conexão ao iniciar
-pool.on('connect', () => {
-  console.log('Conectado ao banco de dados com sucesso!');
+// CLIENTE NOVO A CADA REQUISIÇÃO — CLOUDFLARE TUNNEL AMA
+const createClient = () => {
+  return new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+};
+
+// TESTE IMORTAL
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    status: 'QUEEN STORE IMORTAL', 
+    hora: new Date().toLocaleString('pt-BR'),
+    uptime: process.uptime().toFixed(0) + 's'
+  });
 });
 
-pool.on('error', (err) => {
-  console.error('Erro na conexão com o banco:', err.message);
-});
-
-// Endpoint: Listar todos os produtos
+// LISTAR PRODUTOS (SÓ COM ESTOQUE)
 app.get('/api/produtos', async (req, res) => {
+  const client = createClient();
   try {
-    const { rows } = await pool.query(`
-      SELECT id, nome, preco, imagem, estoque, categoria, badge 
+    await client.connect();
+    const { rows } = await client.query(`
+      SELECT id, nome, preco, imagem, estoque, categoria, badge, descricao 
       FROM produtos 
+      WHERE estoque > 0 
       ORDER BY id
     `);
-    res.status(200).json(rows);
+    await client.end();
+    res.json(rows);
   } catch (err) {
-    console.error('Erro ao buscar produtos:', err.message);
-    res.status(500).json({ error: 'Erro interno do servidor', details: err.message });
+    console.error('ERRO PRODUTOS:', err.message);
+    try { await client.end(); } catch {}
+    res.status(500).json({ erro: 'Banco em manutenção (volta em 5s)' });
   }
 });
 
-// Endpoint: Buscar produto por ID (útil para página de detalhes)
+// PRODUTO POR ID
 app.get('/api/produtos/:id', async (req, res) => {
   const { id } = req.params;
+  const client = createClient();
   try {
-    const { rows } = await pool.query('SELECT * FROM produtos WHERE id = $1', [id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Produto não encontrado' });
-    }
-    res.status(200).json(rows[0]);
+    await client.connect();
+    const { rows } = await client.query('SELECT * FROM produtos WHERE id = $1 AND estoque > 0', [id]);
+    await client.end();
+    if (rows.length === 0) return res.status(404).json({ erro: 'Produto esgotado ou não encontrado' });
+    res.json(rows[0]);
   } catch (err) {
-    console.error('Erro ao buscar produto:', err.message);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    try { await client.end(); } catch {}
+    res.status(500).json({ erro: 'Erro interno' });
   }
 });
 
-// Endpoint: Adicionar ao carrinho (simulação simples)
+// ADICIONAR AO CARRINHO
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
+  const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
+  const client = createClient();
+
   try {
-    // Verifica se o produto existe
-    const produtoCheck = await pool.query('SELECT * FROM produtos WHERE id = $1', [produto_id]);
-    if (produtoCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Produto não encontrado' });
+    await client.connect();
+
+    // Verifica produto e estoque
+    const prod = await client.query('SELECT id, nome, estoque FROM produtos WHERE id = $1', [produto_id]);
+    if (prod.rows.length === 0 || prod.rows[0].estoque < 1) {
+      await client.end();
+      return res.status(400).json({ erro: 'Produto esgotado' });
     }
 
-    // Insere no carrinho (tabela carrinho deve existir)
-    const { rows } = await pool.query(
-      `INSERT INTO carrinho (produto_id, quantidade) 
-       VALUES ($1, $2) 
-       RETURNING id, produto_id, quantidade`,
-      [produto_id, quantidade]
+    // Verifica total no carrinho
+    const totalRes = await client.query(
+      'SELECT COALESCE(SUM(quantidade), 0) as total FROM carrinho WHERE produto_id = $1 AND sessao = $2',
+      [produto_id, sessao]
     );
-    res.status(201).json(rows[0]);
+    const total = parseInt(totalRes.rows[0].total) + quantidade;
+    if (total > prod.rows[0].estoque) {
+      await client.end();
+      return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: prod.rows[0].estoque });
+    }
+
+    // Adiciona
+    await client.query(`
+      INSERT INTO carrinho (produto_id, quantidade, sessao) 
+      VALUES ($1, $2, $3) 
+      ON CONFLICT (produto_id, sessao) DO UPDATE SET quantidade = carrinho.quantidade + $2
+    `, [produto_id, quantidade, sessao]);
+
+    await client.end();
+    res.json({ sucesso: true, mensagem: 'Adicionado ao carrinho!' });
   } catch (err) {
-    console.error('Erro ao adicionar ao carrinho:', err.message);
-    res.status(500).json({ error: 'Erro ao adicionar ao carrinho' });
+    try { await client.end(); } catch {}
+    console.error('ERRO CARRINHO:', err.message);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 });
 
-// Endpoint: Listar carrinho com detalhes do produto
+// LISTAR CARRINHO
 app.get('/api/carrinho', async (req, res) => {
+  const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
+  const client = createClient();
   try {
-    const { rows } = await pool.query(`
-      SELECT 
-        c.id,
-        c.produto_id,
-        p.nome,
-        p.preco,
-        p.imagem,
-        p.categoria,
-        p.badge,
-        c.quantidade
+    await client.connect();
+    const { rows } = await client.query(`
+      SELECT c.produto_id, p.nome, p.preco, p.imagem, c.quantidade
       FROM carrinho c
       JOIN produtos p ON c.produto_id = p.id
-      ORDER BY c.id
-    `);
-    res.status(200).json(rows);
+      WHERE c.sessao = $1
+    `, [sessao]);
+    await client.end();
+    res.json(rows);
   } catch (err) {
-    console.error('Erro ao listar carrinho:', err.message);
-    res.status(500).json({ error: 'Erro ao carregar carrinho' });
+    try { await client.end(); } catch {}
+    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
   }
 });
 
-// Endpoint: Formulário de contato
+// CONTATO
 app.post('/api/contato', async (req, res) => {
   const { email } = req.body;
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ error: 'E-mail inválido' });
-  }
+  if (!email || !email.includes('@')) return res.status(400).json({ erro: 'Email inválido' });
+  const client = createClient();
   try {
-    const { rows } = await pool.query(
-      'INSERT INTO contatos (email) VALUES ($1) RETURNING id, email, created_at',
-      [email]
-    );
-    res.status(201).json({ message: 'Inscrição realizada com sucesso!', data: rows[0] });
+    await client.connect();
+    await client.query('INSERT INTO contatos (email) VALUES ($1)', [email]);
+    await client.end();
+    res.json({ mensagem: 'Inscrito com sucesso!' });
   } catch (err) {
-    console.error('Erro ao salvar contato:', err.message);
-    res.status(500).json({ error: 'Erro ao processar inscrição' });
+    try { await client.end(); } catch {}
+    res.status(500).json({ erro: 'Erro ao salvar' });
   }
 });
 
-// Health check
+// HEALTH
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ status: 'OK', hora: new Date().toLocaleString('pt-BR') });
 });
 
-// Inicia o servidor
-const PORT = process.env.PORT || 5000;
+// INICIA
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API da Queen Store rodando na porta ${PORT}`);
-  console.log(`Acesse: http://localhost:${PORT}/api/produtos`);
+  console.log(`QUEEN STORE IMORTAL RODANDO NA PORTA ${PORT}`);
+  console.log(`TESTE: https://seasons-admissions-arctic-height.trycloudflare.com/api/test`);
 });
