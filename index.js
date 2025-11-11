@@ -1,4 +1,4 @@
-// src/index.js — QUEEN STORE API IMORTAL (Cloudflare Tunnel + Railway + PM2)
+// src/index.js — QUEEN STORE IMORTAL COM DB_HOST + SSL + CLOUDFLARE TUNNEL
 require('dotenv').config();
 const express = require('express');
 const { Client } = require('pg'); // Client = NUNCA MAIS ECONNRESET
@@ -6,7 +6,7 @@ const { Client } = require('pg'); // Client = NUNCA MAIS ECONNRESET
 const app = express();
 app.use(express.json());
 
-// CORS FORÇADO — CLOUDFLARE NÃO TEM COMO BLOQUEAR
+// CORS FORÇADO — CLOUDFLARE NÃO BLOQUEIA
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
@@ -27,11 +27,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CLIENTE NOVO A CADA REQUISIÇÃO — CLOUDFLARE TUNNEL AMA
+// CLIENTE COM DB_HOST + SSL OBRIGATÓRIO
 const createClient = () => {
   return new Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT) || 5432,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASS,
+    database: process.env.DB_NAME,
+    ssl: {
+      rejectUnauthorized: false,  // OBRIGATÓRIO PRO RAILWAY/NEON
+      requestCert: true
+    }
   });
 };
 
@@ -40,11 +47,12 @@ app.get('/api/test', (req, res) => {
   res.json({ 
     status: 'QUEEN STORE IMORTAL', 
     hora: new Date().toLocaleString('pt-BR'),
+    db: 'DB_HOST + SSL ATIVO',
     uptime: process.uptime().toFixed(0) + 's'
   });
 });
 
-// LISTAR PRODUTOS (SÓ COM ESTOQUE)
+// LISTAR PRODUTOS
 app.get('/api/produtos', async (req, res) => {
   const client = createClient();
   try {
@@ -72,7 +80,7 @@ app.get('/api/produtos/:id', async (req, res) => {
     await client.connect();
     const { rows } = await client.query('SELECT * FROM produtos WHERE id = $1 AND estoque > 0', [id]);
     await client.end();
-    if (rows.length === 0) return res.status(404).json({ erro: 'Produto esgotado ou não encontrado' });
+    if (rows.length === 0) return res.status(404).json({ erro: 'Produto esgotado' });
     res.json(rows[0]);
   } catch (err) {
     try { await client.end(); } catch {}
@@ -89,14 +97,12 @@ app.post('/api/carrinho', async (req, res) => {
   try {
     await client.connect();
 
-    // Verifica produto e estoque
     const prod = await client.query('SELECT id, nome, estoque FROM produtos WHERE id = $1', [produto_id]);
     if (prod.rows.length === 0 || prod.rows[0].estoque < 1) {
       await client.end();
       return res.status(400).json({ erro: 'Produto esgotado' });
     }
 
-    // Verifica total no carrinho
     const totalRes = await client.query(
       'SELECT COALESCE(SUM(quantidade), 0) as total FROM carrinho WHERE produto_id = $1 AND sessao = $2',
       [produto_id, sessao]
@@ -107,7 +113,6 @@ app.post('/api/carrinho', async (req, res) => {
       return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: prod.rows[0].estoque });
     }
 
-    // Adiciona
     await client.query(`
       INSERT INTO carrinho (produto_id, quantidade, sessao) 
       VALUES ($1, $2, $3) 
