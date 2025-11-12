@@ -88,21 +88,32 @@ app.get('/api/produtos/:id', async (req, res) => {
   }
 });
 
-// ADICIONAR AO CARRINHO
+// ADICIONAR AO CARRINHO — VERSÃO IMORTAL
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
-  const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
-  const client = createClient();
+  
+  // VALIDAÇÃO SIMPLES
+  if (!produto_id || isNaN(produto_id)) {
+    return res.status(400).json({ erro: 'produto_id inválido' });
+  }
 
+  const client = createClient();
   try {
     await client.connect();
 
+    // VERIFICA PRODUTO E ESTOQUE
     const prod = await client.query('SELECT id, nome, estoque FROM produtos WHERE id = $1', [produto_id]);
-    if (prod.rows.length === 0 || prod.rows[0].estoque < 1) {
+    if (prod.rows.length === 0) {
+      await client.end();
+      return res.status(400).json({ erro: 'Produto não encontrado' });
+    }
+    if (prod.rows[0].estoque < 1) {
       await client.end();
       return res.status(400).json({ erro: 'Produto esgotado' });
     }
 
+    // VERIFICA TOTAL NO CARRINHO
+    const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
     const totalRes = await client.query(
       'SELECT COALESCE(SUM(quantidade), 0) as total FROM carrinho WHERE produto_id = $1 AND sessao = $2',
       [produto_id, sessao]
@@ -113,6 +124,7 @@ app.post('/api/carrinho', async (req, res) => {
       return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: prod.rows[0].estoque });
     }
 
+    // ADICIONA
     await client.query(`
       INSERT INTO carrinho (produto_id, quantidade, sessao) 
       VALUES ($1, $2, $3) 
@@ -120,13 +132,13 @@ app.post('/api/carrinho', async (req, res) => {
     `, [produto_id, quantidade, sessao]);
 
     await client.end();
-    res.json({ sucesso: true, mensagem: 'Adicionado ao carrinho!' });
+    res.json({ sucesso: true, mensagem: 'Adicionado!' });
   } catch (err) {
     try { await client.end(); } catch {}
     console.error('ERRO CARRINHO:', err.message);
     res.status(500).json({ erro: 'Erro interno' });
   }
-});
+  });
 
 // LISTAR CARRINHO
 app.get('/api/carrinho', async (req, res) => {
