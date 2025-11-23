@@ -10,8 +10,7 @@ app.use(express.json());
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
-    'https://queen-store-476215.web.app',
-    'https://queen-store.web.app'
+    'https://queen-store-frontend.vercel.app/'
   ];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -27,133 +26,68 @@ app.use((req, res, next) => {
   next();
 });
 
-// CLIENT WITH DATABASE_URL + SSL REQUIRED
-const createClient = () => {
-  return new Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-      rejectUnauthorized: false,
-      requestCert: true
-    }
-  });
-};
-
-// TESTE CONFIGURAÇÃO
-app.get('/api/test', (req, res) => {
-  res.json({ 
-    status: 'QUEEN STORE IMORTAL', 
-    hora: new Date().toLocaleString('pt-BR'),
-    db: 'DB_HOST + SSL ATIVO',
-    uptime: process.uptime().toFixed(0) + 's'
-  });
+const pool = new pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+    requestCert: true
+  }
 });
 
-// LISTAR PRODUTOS
+// LISTA PRODUTOS
 app.get('/api/produtos', async (req, res) => {
-  const client = createClient();
   try {
-    await client.connect();
-    const { rows } = await client.query(`
-      SELECT id, nome, preco, imagem, estoque, categoria, badge, descricao 
-      FROM produtos 
-      WHERE estoque > 0 
-      ORDER BY id
-    `);
-    await client.end();
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM produtos ORDER BY id');
+    res.json(result.rows);
   } catch (err) {
-    console.error('ERRO PRODUTOS:', err.message);
-    try { await client.end(); } catch {}
-    res.status(500).json({ erro: 'Banco em manutenção (volta em 5s)' });
+    console.error(err);
+    res.status(500).json({ erro: 'Erro ao carregar produtos' });
   }
 });
 
-// PRODUTO POR ID
-app.get('/api/produtos/:id', async (req, res) => {
-  const { id } = req.params;
-  const client = createClient();
-  try {
-    await client.connect();
-    const { rows } = await client.query('SELECT * FROM produtos WHERE id = $1 AND estoque > 0', [id]);
-    await client.end();
-    if (rows.length === 0) return res.status(404).json({ erro: 'Produto esgotado' });
-    res.json(rows[0]);
-  } catch (err) {
-    try { await client.end(); } catch {}
-    res.status(500).json({ erro: 'Erro interno' });
-  }
-});
-
-// ADICIONAR AO CARRINHO
-app.post('/api/carrinho', async (req, res) => {
-  const { produto_id, quantidade = 1 } = req.body;
-  
-  // SIMPLE VALIDATION
-  if (!produto_id || isNaN(produto_id)) {
-    return res.status(400).json({ erro: 'produto_id inválido' });
-  }
-
-  const client = createClient();
-  try {
-    await client.connect();
-
-    // VERIFICA PRODUTO E ESTOQUE
-    const prod = await client.query('SELECT id, nome, estoque FROM produtos WHERE id = $1', [produto_id]);
-    if (prod.rows.length === 0) {
-      await client.end();
-      return res.status(400).json({ erro: 'Produto não encontrado' });
-    }
-    if (prod.rows[0].estoque < 1) {
-      await client.end();
-      return res.status(400).json({ erro: 'Produto esgotado' });
-    }
-
-    // VERIFICA TOTAL NO CARRINHO
-    const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
-    const totalRes = await client.query(
-      'SELECT COALESCE(SUM(quantidade), 0) as total FROM carrinho WHERE produto_id = $1 AND sessao = $2',
-      [produto_id, sessao]
-    );
-    const total = parseInt(totalRes.rows[0].total) + quantidade;
-    if (total > prod.rows[0].estoque) {
-      await client.end();
-      return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: prod.rows[0].estoque });
-    }
-
-    // ADICIONA
-    await client.query(`
-      INSERT INTO carrinho (produto_id, quantidade, sessao) 
-      VALUES ($1, $2, $3) 
-      ON CONFLICT (produto_id, sessao) DO UPDATE SET quantidade = carrinho.quantidade + $2
-    `, [produto_id, quantidade, sessao]);
-
-    await client.end();
-    res.json({ sucesso: true, mensagem: 'Adicionado!' });
-  } catch (err) {
-    try { await client.end(); } catch {}
-    console.error('ERRO CARRINHO:', err.message);
-    res.status(500).json({ erro: 'Erro interno' });
-  }
-  });
-
-// LISTAR CARRINHO
+// CARRINHO - LISTAR
 app.get('/api/carrinho', async (req, res) => {
-  const sessao = req.headers['x-session-id'] || 'web_' + Date.now();
-  const client = createClient();
+  const sessao = req.headers['x-session-id'] || 'temp';
   try {
-    await client.connect();
-    const { rows } = await client.query(`
-      SELECT c.produto_id, p.nome, p.preco, p.imagem, c.quantidade
-      FROM carrinho c
-      JOIN produtos p ON c.produto_id = p.id
+    const result = await pool.query(`
+      SELECT c.*, p.nome, p.preco, p.imagem 
+      FROM carrinho c 
+      JOIN produtos p ON c.produto_id = p.id 
       WHERE c.sessao = $1
     `, [sessao]);
-    await client.end();
-    res.json(rows);
+    res.json(result.rows);
   } catch (err) {
-    try { await client.end(); } catch {}
-    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
+    res.status(500).json({ erro: 'Erro no carrinho' });
   }
+});
+
+// CARRINHO - ADICIONAR/ATUALIZAR
+app.post('/api/carrinho', async (req, res) => {
+  const { produto_id, quantidade = 1 } = req.body;
+  const sessao = req.headers['x-session-id'] || 'temp';
+
+  try {
+    await pool.query(`
+      INSERT INTO carrinho (sessao, produto_id, quantidade)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (sessao, produto_id) DO UPDATE SET quantidade = EXCLUDED.quantidade
+    `, [sessao, produto_id, quantidade]);
+
+    // Atualiza estoque
+    if (quantidade > 0) {
+      await pool.query('UPDATE produtos SET estoque = estoque - 1 WHERE id = $1 AND estoque > 0', [produto_id]);
+    }
+
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: 'Erro ao adicionar' });
+  }
+});
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`Queen Store API rodando na porta ${PORT} com CORS liberado!`);
 });
 
 // CONTATO
@@ -175,11 +109,4 @@ app.post('/api/contato', async (req, res) => {
 // HEALTH
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', hora: new Date().toLocaleString('pt-BR') });
-});
-
-// INICIA
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`QUEEN STORE IMORTAL RODANDO NA PORTA ${PORT}`);
-  console.log(`TESTE: https://seasons-admissions-arctic-height.trycloudflare.com/api/test`);
 });
