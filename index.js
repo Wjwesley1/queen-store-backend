@@ -151,6 +151,14 @@ app.delete('/api/carrinho/:produto_id', async (req, res) => {
   }
 });
 
+app.get('/api/carrinho/:produto_id', (req, res) => {
+  res.status(405).json({ 
+    erro: 'Método não permitido', 
+    dica: 'Use DELETE para remover um item do carrinho',
+    metodo_correto: 'DELETE',
+    url_exemplo: 'https://queen-store-api.onrender.com/api/carrinho/21'
+  });
+});
 
 // HEALTH
 app.get('/health', (req, res) => {
