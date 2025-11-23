@@ -55,61 +55,91 @@ app.get('/api/produtos', async (req, res) => {
   }
 });
 
-// CARRINHO - LISTAR ITENS
+// CARRINHO - LISTAR ITENS (PERFEITA)
 app.get('/api/carrinho', async (req, res) => {
   const sessao = req.headers['x-session-id'] || 'temp';
   try {
     const result = await pool.query(`
-      SELECT c.*, p.nome, p.preco, p.imagem, p.estoque
+      SELECT 
+        c.id,
+        c.sessao,
+        c.produto_id,
+        c.quantidade,
+        p.nome,
+        p.preco,
+        p.imagem,
+        p.estoque as estoque_atual
       FROM carrinho c 
       JOIN produtos p ON c.produto_id = p.id 
       WHERE c.sessao = $1
+      ORDER BY c.id
     `, [sessao]);
+
     res.json(result.rows);
   } catch (err) {
-    console.error('Erro no carrinho:', err);
+    console.error('Erro ao carregar carrinho:', err);
     res.status(500).json({ erro: 'Erro ao carregar carrinho' });
   }
 });
 
-// CARRINHO - ADICIONAR OU ATUALIZAR
+// CARRINHO - ADICIONAR OU ATUALIZAR (IMORTAL AGORA)
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
   const sessao = req.headers['x-session-id'] || 'temp';
 
-  if (!produto_id) {
-    return res.status(400).json({ erro: 'produto_id obrigatório' });
+  if (!produto_id || isNaN(produto_id)) {
+    return res.status(400).json({ erro: 'produto_id inválido' });
+  }
+
+  const produtoId = parseInt(produto_id);
+  const qtd = parseInt(quantidade);
+
+  if (qtd < 1) {
+    return res.status(400).json({ erro: 'Quantidade deve ser maior que 0' });
   }
 
   try {
-    // Verifica estoque antes
-    const estoqueCheck = await pool.query('SELECT estoque FROM produtos WHERE id = $1', [produto_id]);
-    if (estoqueCheck.rows.length === 0) {
+    // 1. Verifica se o produto existe e tem estoque
+    const prodCheck = await pool.query(
+      'SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', 
+      [produtoId]
+    );
+
+    if (prodCheck.rows.length === 0) {
       return res.status(404).json({ erro: 'Produto não encontrado' });
     }
-    if (estoqueCheck.rows[0].estoque < 1) {
-      return res.status(400).json({ erro: 'Produto esgotado' });
+
+    const produto = prodCheck.rows[0];
+
+    if (produto.estoque < qtd) {
+      return res.status(400).json({ 
+        erro: 'Estoque insuficiente', 
+        disponivel: produto.estoque 
+      });
     }
 
-    // Adiciona/atualiza carrinho
+    // 2. Adiciona ou atualiza no carrinho
     await pool.query(`
       INSERT INTO carrinho (sessao, produto_id, quantidade)
       VALUES ($1, $2, $3)
-      ON CONFLICT (sessao, produto_id) DO UPDATE SET quantidade = EXCLUDED.quantidade
-    `, [sessao, produto_id, quantidade]);
+      ON CONFLICT (sessao, produto_id) 
+      DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
+    `, [sessao, produtoId, qtd]);
 
-    // Reduz estoque
-    if (quantidade > 0) {
-      await pool.query(
-        'UPDATE produtos SET estoque = estoque - 1 WHERE id = $1 AND estoque > 0',
-        [produto_id]
-      );
-    }
+    // 3. Reduz o estoque
+    await pool.query(
+      'UPDATE produtos SET estoque = estoque - $1 WHERE id = $2',
+      [qtd, produtoId]
+    );
 
-    res.json({ sucesso: true, mensagem: 'Adicionado ao carrinho!' });
+    res.json({ 
+      sucesso: true, 
+      mensagem: `\( {qtd > 1 ? qtd : '1'} \){produto.nome} adicionado(s) ao carrinho!` 
+    });
+
   } catch (err) {
     console.error('Erro ao adicionar no carrinho:', err);
-    res.status(500).json({ erro: 'Erro interno' });
+    res.status(500).json({ erro: 'Erro interno do servidor' });
   }
 });
 
