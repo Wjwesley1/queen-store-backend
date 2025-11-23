@@ -151,6 +151,7 @@ app.delete('/api/carrinho/:produto_id', async (req, res) => {
   }
 });
 
+
 // HEALTH
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
