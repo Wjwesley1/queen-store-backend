@@ -1,10 +1,10 @@
-// src/index.js — QUEEN STORE BACKEND IMORTAL (Render + Neon + Vercel)
+// src/index.js — QUEEN STORE BACKEND 100% FUNCIONAL (Render + Neon + Vercel)
 require('dotenv').config();
 const express = require('express');
-const { Pool } = require('pg'); // CORRIGIDO: Pool, não Client
+const { Pool } = require('pg');
 const app = express();
 
-// CORS LIBERADO PRA VERCEL E LOCALHOST
+// CORS LIBERADO
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
@@ -19,7 +19,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
 
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session-id');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
@@ -31,58 +31,49 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// POOL CORRETO COM NEON.TECH
+// POOL DO NEON
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: { rejectUnauthorized: false }
 });
 
-// ROTA RAIZ
+// RAIZ
 app.get('/', (req, res) => {
-  res.json({ mensagem: 'Queen Store API rodando 100%!', status: 'IMORTAL' });
+  res.json({ mensagem: 'Queen Store API IMORTAL', status: '100% NO AR' });
 });
 
-// LISTA TODOS OS PRODUTOS
+// LISTA PRODUTOS
 app.get('/api/produtos', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM produtos ORDER BY id');
     res.json(result.rows);
   } catch (err) {
-    console.error('Erro ao carregar produtos:', err);
+    console.error('Erro produtos:', err);
     res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// CARRINHO - LISTAR ITENS (PERFEITA)
+// CARRINHO - LISTAR
 app.get('/api/carrinho', async (req, res) => {
   const sessao = req.headers['x-session-id'] || 'temp';
   try {
     const result = await pool.query(`
       SELECT 
-        c.id,
-        c.sessao,
-        c.produto_id,
-        c.quantidade,
-        p.nome,
-        p.preco,
-        p.imagem,
-        p.estoque as estoque_atual
+        c.id, c.produto_id, c.quantidade,
+        p.nome, p.preco, p.imagem, p.estoque as estoque_atual
       FROM carrinho c 
       JOIN produtos p ON c.produto_id = p.id 
       WHERE c.sessao = $1
       ORDER BY c.id
     `, [sessao]);
-
     res.json(result.rows);
   } catch (err) {
-    console.error('Erro ao carregar carrinho:', err);
+    console.error('Erro carrinho GET:', err);
     res.status(500).json({ erro: 'Erro ao carregar carrinho' });
   }
 });
 
-// CARRINHO - ADICIONAR OU ATUALIZAR (IMORTAL AGORA)
+// CARRINHO - ADICIONAR
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
   const sessao = req.headers['x-session-id'] || 'temp';
@@ -95,30 +86,18 @@ app.post('/api/carrinho', async (req, res) => {
   const qtd = parseInt(quantidade);
 
   if (qtd < 1) {
-    return res.status(400).json({ erro: 'Quantidade deve ser maior que 0' });
+    return res.status(400).json({ erro: 'Quantidade inválida' });
   }
 
   try {
-    // 1. Verifica se o produto existe e tem estoque
-    const prodCheck = await pool.query(
-      'SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', 
-      [produtoId]
-    );
+    const check = await pool.query('SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', [produtoId]);
+    if (check.rows.length === 0) return res.status(404).json({ erro: 'Produto não encontrado' });
 
-    if (prodCheck.rows.length === 0) {
-      return res.status(404).json({ erro: 'Produto não encontrado' });
-    }
-
-    const produto = prodCheck.rows[0];
-
+    const produto = check.rows[0];
     if (produto.estoque < qtd) {
-      return res.status(400).json({ 
-        erro: 'Estoque insuficiente', 
-        disponivel: produto.estoque 
-      });
+      return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: produto.estoque });
     }
 
-    // 2. Adiciona ou atualiza no carrinho
     await pool.query(`
       INSERT INTO carrinho (sessao, produto_id, quantidade)
       VALUES ($1, $2, $3)
@@ -126,71 +105,59 @@ app.post('/api/carrinho', async (req, res) => {
       DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
     `, [sessao, produtoId, qtd]);
 
-    // 3. Reduz o estoque
-    await pool.query(
-      'UPDATE produtos SET estoque = estoque - $1 WHERE id = $2',
-      [qtd, produtoId]
-    );
+    await pool.query('UPDATE produtos SET estoque = estoque - $1 WHERE id = $2', [qtd, produtoId]);
 
     res.json({ 
       sucesso: true, 
-      mensagem: `\( {qtd > 1 ? qtd : '1'} \){produto.nome} adicionado(s) ao carrinho!` 
+      mensagem: `\( {qtd} \){produto.nome} adicionado(s)!` 
     });
-
   } catch (err) {
-    console.error('Erro ao adicionar no carrinho:', err);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    console.error('Erro POST carrinho:', err);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 });
 
-// REMOVE ITEM DO CARRINHO
+// REMOVE DO CARRINHO — ROTA CORRETA
 app.delete('/api/carrinho/:produto_id', async (req, res) => {
   const { produto_id } = req.params;
   const sessao = req.headers['x-session-id'] || 'temp';
 
   try {
-    // Pega a quantidade que tava no carrinho antes de deletar
     const item = await pool.query(
       'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
       [sessao, produto_id]
     );
 
     if (item.rows.length === 0) {
-      return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
+      return res.status(404).json({ erro: 'Item não encontrado' });
     }
 
-    const quantidadeRemovida = item.rows[0].quantidade;
+    const qtd = item.rows[0].quantidade;
 
-    // Remove do carrinho
     await pool.query(
       'DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2',
       [sessao, produto_id]
     );
 
-    // Devolve o estoque
     await pool.query(
       'UPDATE produtos SET estoque = estoque + $1 WHERE id = $2',
-      [quantidadeRemovida, produto_id]
+      [qtd, produto_id]
     );
 
-    res.json({ sucesso: true, mensagem: 'Removido do carrinho!' });
+    res.json({ sucesso: true, mensagem: 'Removido com sucesso!' });
   } catch (err) {
-    console.error('Erro ao remover do carrinho:', err);
+    console.error('Erro DELETE carrinho:', err);
     res.status(500).json({ erro: 'Erro ao remover' });
   }
 });
 
-// HEALTH CHECK
+// HEALTH
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    hora: new Date().toLocaleString('pt-BR'),
-    rainha: 'Wesley, porra!'
-  });
+  res.json({ status: 'OK' });
 });
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`QUEEN STORE API RODANDO NA PORTA ${PORT} COM CORS LIBERADO!`);
+  console.log(`QUEEN STORE API RODANDO NA PORTA ${PORT}`);
   console.log(`https://queen-store-api.onrender.com`);
 });
