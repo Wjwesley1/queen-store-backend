@@ -1,32 +1,38 @@
 {
   "name": "queen-store-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend oficial da Queen Store - Sabonetes Artesanais",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Wjwesley1/queen-store-backend.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "keywords": [
+    "queen-store",
+    "sabonete",
+    "ecommerce",
+    "postgres",
+    "neon",
+    "render"
+  ],
+  "author": "Wesley ",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/Wjwesley1/queen-store-backend/issues"
   },
-  "homepage": "https://github.com/Wjwesley1/queen-store-backend#readme",
+  "homepage": "https://queen-store-frontend.vercel.app/",
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "pg": "^8.16.3"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "pg": "^8.13.0"
   },
-  "devDependencies": {
-    "autoprefixer": "^10.4.21",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.16"
+  "engines": {
+    "node": ">=18.x"
   }
 }
