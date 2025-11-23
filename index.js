@@ -1,12 +1,12 @@
-// src/index.js — QUEEN STORE IMORTAL COM DB_HOST + SSL + CLOUDFLARE TUNNEL
+// src/index.js
 require('dotenv').config();
 const express = require('express');
-const { Client } = require('pg'); // Client = NUNCA MAIS ECONNRESET
+const { Client } = require('pg'); 
 
 const app = express();
 app.use(express.json());
 
-// CORS FORÇADO — CLOUDFLARE NÃO BLOQUEIA
+// CORS CONFIGURATION
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
@@ -27,22 +27,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CLIENTE COM DB_HOST + SSL OBRIGATÓRIO
+// CLIENT WITH DATABASE_URL + SSL REQUIRED
 const createClient = () => {
   return new Client({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT) || 5432,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
+    connectionString: process.env.DATABASE_URL,
     ssl: {
-      rejectUnauthorized: false,  // OBRIGATÓRIO PRO RAILWAY/NEON
+      rejectUnauthorized: false,
       requestCert: true
     }
   });
 };
 
-// TESTE IMORTAL
+// TESTE CONFIGURAÇÃO
 app.get('/api/test', (req, res) => {
   res.json({ 
     status: 'QUEEN STORE IMORTAL', 
@@ -88,11 +84,11 @@ app.get('/api/produtos/:id', async (req, res) => {
   }
 });
 
-// ADICIONAR AO CARRINHO — VERSÃO IMORTAL
+// ADICIONAR AO CARRINHO
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
   
-  // VALIDAÇÃO SIMPLES
+  // SIMPLE VALIDATION
   if (!produto_id || isNaN(produto_id)) {
     return res.status(400).json({ erro: 'produto_id inválido' });
   }
