@@ -143,6 +143,43 @@ app.post('/api/carrinho', async (req, res) => {
   }
 });
 
+// REMOVE ITEM DO CARRINHO
+app.delete('/api/carrinho/:produto_id', async (req, res) => {
+  const { produto_id } = req.params;
+  const sessao = req.headers['x-session-id'] || 'temp';
+
+  try {
+    // Pega a quantidade que tava no carrinho antes de deletar
+    const item = await pool.query(
+      'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
+      [sessao, produto_id]
+    );
+
+    if (item.rows.length === 0) {
+      return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
+    }
+
+    const quantidadeRemovida = item.rows[0].quantidade;
+
+    // Remove do carrinho
+    await pool.query(
+      'DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2',
+      [sessao, produto_id]
+    );
+
+    // Devolve o estoque
+    await pool.query(
+      'UPDATE produtos SET estoque = estoque + $1 WHERE id = $2',
+      [quantidadeRemovida, produto_id]
+    );
+
+    res.json({ sucesso: true, mensagem: 'Removido do carrinho!' });
+  } catch (err) {
+    console.error('Erro ao remover do carrinho:', err);
+    res.status(500).json({ erro: 'Erro ao remover' });
+  }
+});
+
 // HEALTH CHECK
 app.get('/health', (req, res) => {
   res.json({ 
