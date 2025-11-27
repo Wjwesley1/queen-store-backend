@@ -155,10 +155,10 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
   try {
     const produto_id = parseInt(req.params.produto_id);
     const { quantidade } = req.body;
-    const sessionId = req.headers['x-session-id'];
+    const session = req.headers['x-session-id'];
 
     // Validações básicas
-    if (!sessionId) {
+    if (!session) {
       return res.status(400).json({ erro: 'Sessão não encontrada' });
     }
     if (!quantidade || quantidade < 0) {
@@ -168,8 +168,8 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
     if (quantidade === 0) {
       // Remove se for zero
       await pool.query(
-        'DELETE FROM carrinho WHERE session_id = $1 AND produto_id = $2',
-        [sessionId, produto_id]
+        'DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2',
+        [session, produto_id]
       );
       return res.json({ sucesso: true });
     }
@@ -178,9 +178,9 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
     const result = await pool.query(
       `UPDATE carrinho 
        SET quantidade = $1 
-       WHERE session_id = $2 AND produto_id = $3 
+       WHERE sessao = $2 AND produto_id = $3 
        RETURNING *`,
-      [quantidade, sessionId, produto_id]
+      [quantidade, session, produto_id]
     );
 
     if (result.rowCount === 0) {
