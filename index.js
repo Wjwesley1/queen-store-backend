@@ -150,27 +150,43 @@ app.post('/api/carrinho', async (req, res) => {
   }
 });
 
-// ATUALIZAR QUANTIDADE NO CARRINHO
+// ROTA PUT — ATUALIZAR QUANTIDADE NO CARRINHO (OBRIGATÓRIA!!!)
 app.put('/api/carrinho/:produto_id', async (req, res) => {
   const { produto_id } = req.params;
   const { quantidade } = req.body;
   const sessionId = req.headers['x-session-id'];
 
-  if (quantidade < 1) {
-    // Se for 0, remove
-    await pool.query('DELETE FROM carrinho WHERE session_id = $1 AND produto_id = $2', [sessionId, produto_id]);
-    res.json({ sucesso: true });
-    return;
+  if (!sessionId) {
+    return res.status(400).json({ erro: 'Sessão não encontrada' });
+  }
+
+  if (!quantidade || quantidade < 0) {
+    return res.status(400).json({ erro: 'Quantidade inválida' });
   }
 
   try {
-    await pool.query(
-      'UPDATE carrinho SET quantidade = $1 WHERE session_id = $2 AND produto_id = $3',
-      [quantidade, sessionId, produto_id]
-    );
+    if (quantidade == 0) {
+      // Remove o item se quantidade for zero
+      await pool.query(
+        'DELETE FROM carrinho WHERE session_id = $1 AND produto_id = $2',
+        [sessionId, produto_id]
+      );
+    } else {
+      // Atualiza a quantidade
+      const result = await pool.query(
+        'UPDATE carrinho SET quantidade = $1 WHERE session_id = $2 AND produto_id = $3 RETURNING *',
+        [quantidade, sessionId, produto_id]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
+      }
+    }
+
     res.json({ sucesso: true });
   } catch (err) {
-    res.status(500).json({ erro: 'Erro ao atualizar' });
+    console.error('Erro no PUT carrinho:', err);
+    res.status(500).json({ erro: 'Erro interno do servidor' });
   }
 });
 
