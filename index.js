@@ -148,6 +148,30 @@ app.post('/api/carrinho', async (req, res) => {
   }
 });
 
+// ATUALIZAR QUANTIDADE NO CARRINHO
+app.put('/api/carrinho/:produto_id', async (req, res) => {
+  const { produto_id } = req.params;
+  const { quantidade } = req.body;
+  const sessionId = req.headers['x-session-id'];
+
+  if (quantidade < 1) {
+    // Se for 0, remove
+    await pool.query('DELETE FROM carrinho WHERE session_id = $1 AND produto_id = $2', [sessionId, produto_id]);
+    res.json({ sucesso: true });
+    return;
+  }
+
+  try {
+    await pool.query(
+      'UPDATE carrinho SET quantidade = $1 WHERE session_id = $2 AND produto_id = $3',
+      [quantidade, sessionId, produto_id]
+    );
+    res.json({ sucesso: true });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao atualizar' });
+  }
+});
+
 // ==================== CARRINHO: REMOVER ITEM ====================
 app.delete('/api/carrinho/:produto_id', async (req, res) => {
   const { produto_id } = req.params;
