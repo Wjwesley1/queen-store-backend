@@ -150,43 +150,50 @@ app.post('/api/carrinho', async (req, res) => {
   }
 });
 
-// ROTA PUT — ATUALIZAR QUANTIDADE NO CARRINHO (OBRIGATÓRIA!!!)
+// ROTA PUT — ATUALIZAR QUANTIDADE (VERSÃO À PROVA DE ERRO 500)
 app.put('/api/carrinho/:produto_id', async (req, res) => {
-  const { produto_id } = req.params;
-  const { quantidade } = req.body;
-  const sessionId = req.headers['x-session-id'];
-
-  if (!sessionId) {
-    return res.status(400).json({ erro: 'Sessão não encontrada' });
-  }
-
-  if (!quantidade || quantidade < 0) {
-    return res.status(400).json({ erro: 'Quantidade inválida' });
-  }
-
   try {
-    if (quantidade == 0) {
-      // Remove o item se quantidade for zero
+    const produto_id = parseInt(req.params.produto_id);
+    const { quantidade } = req.body;
+    const sessionId = req.headers['x-session-id'];
+
+    // Validações básicas
+    if (!sessionId) {
+      return res.status(400).json({ erro: 'Sessão não encontrada' });
+    }
+    if (!quantidade || quantidade < 0) {
+      return res.status(400).json({ erro: 'Quantidade inválida' });
+    }
+
+    if (quantidade === 0) {
+      // Remove se for zero
       await pool.query(
         'DELETE FROM carrinho WHERE session_id = $1 AND produto_id = $2',
         [sessionId, produto_id]
       );
-    } else {
-      // Atualiza a quantidade
-      const result = await pool.query(
-        'UPDATE carrinho SET quantidade = $1 WHERE session_id = $2 AND produto_id = $3 RETURNING *',
-        [quantidade, sessionId, produto_id]
-      );
+      return res.json({ sucesso: true });
+    }
 
-      if (result.rowCount === 0) {
-        return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
-      }
+    // Atualiza quantidade
+    const result = await pool.query(
+      `UPDATE carrinho 
+       SET quantidade = $1 
+       WHERE session_id = $2 AND produto_id = $3 
+       RETURNING *`,
+      [quantidade, sessionId, produto_id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
     }
 
     res.json({ sucesso: true });
   } catch (err) {
-    console.error('Erro no PUT carrinho:', err);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    console.error('ERRO NO PUT CARRINHO:', err);
+    res.status(500).json({ 
+      erro: 'Erro interno do servidor',
+      detalhes: err.message 
+    });
   }
 });
 
