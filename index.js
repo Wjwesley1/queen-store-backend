@@ -205,6 +205,23 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ==================== LISTAR CATEGORIAS DO BANCO ====================
+app.get('/api/categorias', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT categoria 
+      FROM produtos 
+      WHERE categoria IS NOT NULL AND categoria != ''
+      ORDER BY categoria
+    `);
+    const categorias = result.rows.map(row => row.categoria);
+    res.json(categorias);
+  } catch (err) {
+    console.error('Erro ao carregar categorias:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
 
