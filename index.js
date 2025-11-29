@@ -63,7 +63,7 @@ app.get('/api/produtos', async (req, res) => {
 
 // ==================== CARRINHO: LISTAR ITENS ====================
 app.get('/api/carrinho', async (req, res) => {
-  const sessionId = req.headers['x-session-id'];   // ← teu frontend manda assim
+  const sessionId = req.headers['x-session-id'|| req.headers['session']];  // ← aceita os dois nomes de header
 
   if (!sessionId) return res.json([]);
 
@@ -98,7 +98,7 @@ app.get('/api/carrinho', async (req, res) => {
 // ==================== CARRINHO: ADICIONAR OU ATUALIZAR ====================
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
-  const sessionId = req.headers['x-session-id'];  // ← exatamente o header do frontend
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← exatamente o header do frontend
 
   if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
   if (!produto_id) return res.status(400).json({ erro: 'Produto inválido' });
@@ -137,7 +137,7 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
   try {
     const produto_id = parseInt(req.params.produto_id);
     const { quantidade } = req.body;
-    const sessionId = req.headers['x-session-id'];  // ← MESMO HEADER!!!
+    const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← MESMO HEADER!!!
 
     if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
     if (quantidade === undefined || quantidade < 0) return res.status(400).json({ erro: 'Quantidade inválida' });
@@ -171,7 +171,7 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
 // ==================== CARRINHO: REMOVER ITEM ====================
 app.delete('/api/carrinho/:produto_id', async (req, res) => {
   const produto_id = parseInt(req.params.produto_id);
-  const sessionId = req.headers['x-session-id'];  // ← MESMO HEADER!!!
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← MESMO HEADER!!!
 
   if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
 
