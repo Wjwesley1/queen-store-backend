@@ -7,29 +7,34 @@ const { Pool } = require('pg');
 
 const app = express();
 
-// ==================== CORS LIBERADO (Vercel + Local + Domínio) ====================
+// ==================== CORS LIBERADO PRA SEMPRE (Vercel + Domínio + Local) ====================
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
     'https://queen-store-frontend.vercel.app',
-    'https://www.queenstore.store/'
+    'https://www.queenstore.store',
+    'https://queenstore.store'  // sem o www também (pra garantir)
   ];
 
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
+
+  // Só define o header se o origin estiver na lista (ou libera tudo com *)
+  if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*'); // fallback seguro
   }
 
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-session-id');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Origin', 'https://queen-store-frontend.vercel.app');
 
+  // Responde preflight automaticamente
   if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+    return res.sendStatus(200);
   }
+
+  next();
 });
 
 app.use(express.json());
