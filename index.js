@@ -7,29 +7,24 @@ const { Pool } = require('pg');
 
 const app = express();
 
-// ==================== CORS LIBERADO PRA SEMPRE (Vercel + Domínio + Local) ====================
+// ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'https://queen-store-frontend.vercel.app',
-    'https://www.queenstore.store',
-    'https://queenstore.store'  // sem o www também (pra garantir)
-  ];
-
+  // Libera o domínio que tá acessando (ou * se quiser)
   const origin = req.headers.origin;
-
-  // Só define o header se o origin estiver na lista (ou libera tudo com *)
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*'); // fallback seguro
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
   }
 
+  // Métodos permitidos
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, session');
+
+  // HEADERS PERMITIDOS — AQUI TAVA O PROBLEMA!!!
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id, X-Session-Id');
+
+  // Permite credenciais (importante pro header customizado)
   res.header('Access-Control-Allow-Credentials', 'true');
 
-  // Responde preflight automaticamente
+  // Responde OPTIONS na hora (preflight)
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
