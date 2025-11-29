@@ -79,7 +79,7 @@ app.get('/api/carrinho', async (req, res) => {
         p.estoque AS estoque_atual
       FROM carrinho c
       JOIN produtos p ON c.produto_id = p.id
-      WHERE c.session = $1          -- ← SEM ACENTO!!!
+      WHERE c.sessao = $1          -- ← SEM ACENTO!!!
       ORDER BY c.id
     `, [sessionId]);
 
@@ -116,9 +116,9 @@ app.post('/api/carrinho', async (req, res) => {
     if (produto.estoque < qtd) return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: produto.estoque });
 
     await pool.query(`
-      INSERT INTO carrinho (session, produto_id, quantidade)
+      INSERT INTO carrinho (sessao, produto_id, quantidade)
       VALUES ($1, $2, $3)
-      ON CONFLICT (session, produto_id) 
+      ON CONFLICT (sessao, produto_id) 
       DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
     `, [sessionId, produtoId, qtd]);
 
@@ -144,17 +144,17 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
 
     if (quantidade === 0) {
       // Remove do carrinho
-      const item = await pool.query('SELECT quantidade FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
+      const item = await pool.query('SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
       if (item.rows.length > 0) {
         await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [item.rows[0].quantidade, produto_id]);
       }
-      await pool.query('DELETE FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
+      await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
       return res.json({ sucesso: true });
     }
 
     // Atualiza quantidade
     const result = await pool.query(
-      'UPDATE carrinho SET quantidade = $1 WHERE session = $2 AND produto_id = $3 RETURNING *',
+      'UPDATE carrinho SET quantidade = $1 WHERE sessao = $2 AND produto_id = $3 RETURNING *',
       [quantidade, sessionId, produto_id]
     );
 
@@ -177,15 +177,14 @@ app.delete('/api/carrinho/:produto_id', async (req, res) => {
 
   try {
     const item = await pool.query(
-      'SELECT quantidade FROM carrinho WHERE session = $1 AND produto_id = $2',
+      'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
       [sessionId, produto_id]
     );
 
     if (item.rows.length === 0) return res.status(404).json({ erro: 'Item não encontrado' });
-
     const quantidadeRemovida = item.rows[0].quantidade;
 
-    await pool.query('DELETE FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
+    await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
     await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [quantidadeRemovida, produto_id]);
 
     res.json({ sucesso: true, mensagem: 'Removido do carrinho!' });
