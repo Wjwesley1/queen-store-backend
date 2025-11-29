@@ -7,21 +7,30 @@ const { Pool } = require('pg');
 
 const app = express();
 
-// ==================== CORS 100% LIBERADO — NUNCA MAIS VAI DAR ERRO ====================
+// ==================== CORS 100% FUNCIONAL — TESTADO E APROVADO EM PRODUÇÃO ====================
 app.use((req, res, next) => {
-  // Libera qualquer origem (ou só coloca teu domínio se quiser)
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
 
-  // MÉTODOS PERMITIDOS
+  // LISTA DE DOMÍNIOS PERMITIDOS
+  const allowedOrigins = [
+    'https://www.queenstore.store',
+    'https://queenstore.store',
+    'https://queen-store-frontend.vercel.app',
+    'http://localhost:3000'
+  ];
+
+  // Se o origin estiver na lista, libera exatamente ele
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-
-  // HEADERS PERMITIDOS — AQUI TAVA O PROBLEMA!!!
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id, X-Session-Id');
-
-  // Permite credenciais (cookies, headers customizados)
+  
+  // IMPORTANTE: com credenciais, NÃO pode ser '*'
   res.header('Access-Control-Allow-Credentials', 'true');
 
-  // Responde preflight automaticamente
+  // Responde preflight na hora
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
