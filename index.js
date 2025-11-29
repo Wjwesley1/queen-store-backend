@@ -26,7 +26,7 @@ app.use((req, res, next) => {
   }
 
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, session');
   res.header('Access-Control-Allow-Credentials', 'true');
 
   // Responde preflight automaticamente
@@ -68,7 +68,7 @@ app.get('/api/produtos', async (req, res) => {
 
 // ==================== CARRINHO: LISTAR ITENS ====================
 app.get('/api/carrinho', async (req, res) => {
-  const sessao = req.headers['x-session-id'] || 'temp';
+  const sessao = req.headers['session'] || 'temp';
 
   try {
     const result = await pool.query(`
@@ -96,7 +96,7 @@ app.get('/api/carrinho', async (req, res) => {
 // ==================== CARRINHO: ADICIONAR OU ATUALIZAR ====================
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
-  const sessao = req.headers['x-session-id'] || 'temp';
+  const sessao = req.headers['session'] || 'temp';
 
   if (!produto_id || isNaN(produto_id)) {
     return res.status(400).json({ erro: 'produto_id inválido' });
@@ -158,7 +158,7 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
   try {
     const produto_id = parseInt(req.params.produto_id);
     const { quantidade } = req.body;
-    const session = req.headers['x-session-id'];
+    const session = req.headers['session'];
 
     // Validações básicas
     if (!session) {
@@ -203,7 +203,7 @@ app.put('/api/carrinho/:produto_id', async (req, res) => {
 // ==================== CARRINHO: REMOVER ITEM ====================
 app.delete('/api/carrinho/:produto_id', async (req, res) => {
   const { produto_id } = req.params;
-  const sessao = req.headers['x-session-id'] || 'temp';
+  const sessao = req.headers['session'] || 'temp';
 
   try {
     // Pega a quantidade antes de deletar
