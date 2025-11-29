@@ -94,13 +94,56 @@ app.get('/api/carrinho', async (req, res) => {
   }
 });
 
+// ==================== CARRINHO: LISTAR ITENS ====================
+app.get('/api/carrinho', async (req, res) => {
+  // Usa o header x-session-id (padrão do teu frontend)
+  const sessionId = req.headers['x-session-id'];
+
+  if (!sessionId) {
+    return res.json([]); // carrinho vazio se não tiver sessão
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.id,
+        c.produto_id,
+        c.quantidade,
+        p.nome,
+        p.preco,
+        p.imagens,           -- agora manda o array de imagens
+        p.estoque AS estoque_atual
+      FROM carrinho c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE c.session = $1
+      ORDER BY c.id
+    `, [sessionId]);
+
+    // Garante que sempre tenha imagem (pra home e detalhe)
+    const itens = result.rows.map(item => ({
+      ...item,
+      imagem: item.imagens && item.imagens.length > 0 ? item.imagens[0] : 'https://i.ibb.co/0jG4vK8/geleia-maracuja.jpg'
+    }));
+
+    res.json(itens);
+  } catch (err) {
+    console.error('Erro ao carregar carrinho:', err);
+    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
+  }
+});
+
+
 // ==================== CARRINHO: ADICIONAR OU ATUALIZAR ====================
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
-  const sessao = req.headers['session'] || 'temp';
+  const sessionId = req.headers['x-session-id']; // ← MESMO HEADER DO FRONTEND
+
+  if (!sessionId) {
+    return res.status(400).json({ erro: 'Sessão não encontrada' });
+  }
 
   if (!produto_id || isNaN(produto_id)) {
-    return res.status(400).json({ erro: 'produto_id inválido' });
+    return res.status(400).json({ erro: 'Produto inválido' });
   }
 
   const produtoId = parseInt(produto_id);
@@ -132,11 +175,11 @@ app.post('/api/carrinho', async (req, res) => {
 
     // Adiciona ou soma no carrinho
     await pool.query(`
-      INSERT INTO carrinho (sessao, produto_id, quantidade)
+      INSERT INTO carrinho (session, produto_id, quantidade)
       VALUES ($1, $2, $3)
-      ON CONFLICT (sessao, produto_id)
+      ON CONFLICT (session, produto_id)
       DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
-    `, [sessao, produtoId, qtd]);
+    `, [sessionId, produtoId, qtd]);
 
     // Reduz estoque
     await pool.query(
@@ -146,8 +189,9 @@ app.post('/api/carrinho', async (req, res) => {
 
     res.json({
       sucesso: true,
-      mensagem: `${qtd > 1 ? qtd : 'Um'} ${produto.nome} adicionado(s) ao carrinho!`
+      mensagem: `\( {qtd > 1 ? qtd + ' unidades' : 'Um item'} de " \){produto.nome}" adicionado(s) ao carrinho!`
     });
+
   } catch (err) {
     console.error('Erro ao adicionar no carrinho:', err);
     res.status(500).json({ erro: 'Erro interno do servidor' });
