@@ -11,10 +11,8 @@ const app = express();
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
-    'http://localhost:5173',
     'https://queen-store-frontend.vercel.app',
-    'https://queenstore.com.br',
-    'https://www.queenstore.com.br'
+    'https://www.queenstore.store/'
   ];
 
   const origin = req.headers.origin;
