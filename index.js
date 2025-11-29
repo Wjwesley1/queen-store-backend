@@ -7,30 +7,29 @@ const { Pool } = require('pg');
 
 const app = express();
 
-// ==================== CORS 100% FUNCIONAL — TESTADO E APROVADO EM PRODUÇÃO ====================
+// ==================== CORS LIBERADO PRA SEMPRE (Vercel + Domínio + Local) ====================
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  // LISTA DE DOMÍNIOS PERMITIDOS
   const allowedOrigins = [
-    'https://www.queenstore.store',
-    'https://queenstore.store',
+    'http://localhost:3000',
     'https://queen-store-frontend.vercel.app',
-    'http://localhost:3000'
+    'https://www.queenstore.store',
+    'https://queenstore.store'  // sem o www também (pra garantir)
   ];
 
-  // Se o origin estiver na lista, libera exatamente ele
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+  const origin = req.headers.origin;
+
+  // Só define o header se o origin estiver na lista (ou libera tudo com *)
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*'); // fallback seguro
   }
 
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id, X-Session-Id');
-  
-  // IMPORTANTE: com credenciais, NÃO pode ser '*'
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, session');
   res.header('Access-Control-Allow-Credentials', 'true');
 
-  // Responde preflight na hora
+  // Responde preflight automaticamente
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -69,7 +68,9 @@ app.get('/api/produtos', async (req, res) => {
 
 // ==================== CARRINHO: LISTAR ITENS ====================
 app.get('/api/carrinho', async (req, res) => {
-  const sessao = req.headers['session'] || 'temp';
+  const sessionId = req.headers['x-session-id'];   // ← teu frontend manda assim
+
+  if (!sessionId) return res.json([]);
 
   try {
     const result = await pool.query(`
@@ -79,50 +80,17 @@ app.get('/api/carrinho', async (req, res) => {
         c.quantidade,
         p.nome,
         p.preco,
-        p.imagem,
+        p.imagens,
         p.estoque AS estoque_atual
       FROM carrinho c
       JOIN produtos p ON c.produto_id = p.id
-      WHERE c.sessao = $1
-      ORDER BY c.id
-    `, [sessao]);
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Erro ao carregar carrinho:', err);
-    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
-  }
-});
-
-// ==================== CARRINHO: LISTAR ITENS ====================
-app.get('/api/carrinho', async (req, res) => {
-  // Usa o header x-session-id (padrão do teu frontend)
-  const sessionId = req.headers['x-session-id'];
-
-  if (!sessionId) {
-    return res.json([]); // carrinho vazio se não tiver sessão
-  }
-
-  try {
-    const result = await pool.query(`
-      SELECT 
-        c.id,
-        c.produto_id,
-        c.quantidade,
-        p.nome,
-        p.preco,
-        p.imagens,           -- agora manda o array de imagens
-        p.estoque AS estoque_atual
-      FROM carrinho c
-      JOIN produtos p ON c.produto_id = p.id
-      WHERE c.session = $1
+      WHERE c.session = $1          -- ← SEM ACENTO!!!
       ORDER BY c.id
     `, [sessionId]);
 
-    // Garante que sempre tenha imagem (pra home e detalhe)
     const itens = result.rows.map(item => ({
       ...item,
-      imagem: item.imagens && item.imagens.length > 0 ? item.imagens[0] : 'https://i.ibb.co/0jG4vK8/geleia-maracuja.jpg'
+      imagem: item.imagens?.[0] || 'https://i.ibb.co/0jG4vK8/geleia-maracuja.jpg'
     }));
 
     res.json(itens);
@@ -132,148 +100,98 @@ app.get('/api/carrinho', async (req, res) => {
   }
 });
 
-
 // ==================== CARRINHO: ADICIONAR OU ATUALIZAR ====================
 app.post('/api/carrinho', async (req, res) => {
   const { produto_id, quantidade = 1 } = req.body;
-  const sessionId = req.headers['x-session-id']; // ← MESMO HEADER DO FRONTEND
+  const sessionId = req.headers['x-session-id'];  // ← exatamente o header do frontend
 
-  if (!sessionId) {
-    return res.status(400).json({ erro: 'Sessão não encontrada' });
-  }
-
-  if (!produto_id || isNaN(produto_id)) {
-    return res.status(400).json({ erro: 'Produto inválido' });
-  }
+  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
+  if (!produto_id) return res.status(400).json({ erro: 'Produto inválido' });
 
   const produtoId = parseInt(produto_id);
   const qtd = parseInt(quantidade);
 
-  if (qtd < 1) {
-    return res.status(400).json({ erro: 'Quantidade deve ser maior que 0' });
-  }
+  if (qtd < 1) return res.status(400).json({ erro: 'Quantidade inválida' });
 
   try {
-    // Verifica estoque com bloqueio (evita venda dupla)
-    const check = await pool.query(
-      'SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE',
-      [produtoId]
-    );
-
-    if (check.rows.length === 0) {
-      return res.status(404).json({ erro: 'Produto não encontrado' });
-    }
+    const check = await pool.query('SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', [produtoId]);
+    if (check.rows.length === 0) return res.status(404).json({ erro: 'Produto não encontrado' });
 
     const produto = check.rows[0];
+    if (produto.estoque < qtd) return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: produto.estoque });
 
-    if (produto.estoque < qtd) {
-      return res.status(400).json({
-        erro: 'Estoque insuficiente',
-        disponivel: produto.estoque
-      });
-    }
-
-    // Adiciona ou soma no carrinho
     await pool.query(`
       INSERT INTO carrinho (session, produto_id, quantidade)
       VALUES ($1, $2, $3)
-      ON CONFLICT (session, produto_id)
+      ON CONFLICT (session, produto_id) 
       DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
     `, [sessionId, produtoId, qtd]);
 
-    // Reduz estoque
-    await pool.query(
-      'UPDATE produtos SET estoque = estoque - $1 WHERE id = $2',
-      [qtd, produtoId]
-    );
+    await pool.query('UPDATE produtos SET estoque = estoque - $1 WHERE id = $2', [qtd, produtoId]);
 
-    res.json({
-      sucesso: true,
-      mensagem: `\( {qtd > 1 ? qtd + ' unidades' : 'Um item'} de " \){produto.nome}" adicionado(s) ao carrinho!`
-    });
-
+    res.json({ sucesso: true, mensagem: `\( {qtd} × \){produto.nome} adicionado(s)!` });
   } catch (err) {
-    console.error('Erro ao adicionar no carrinho:', err);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    console.error('Erro no POST carrinho:', err);
+    res.status(500).json({ erro: 'Erro interno' });
   }
 });
 
-// ROTA PUT — ATUALIZAR QUANTIDADE (VERSÃO À PROVA DE ERRO 500)
+
+// ==================== CARRINHO: ATUALIZAR QUANTIDADE (+ / -) ====================
 app.put('/api/carrinho/:produto_id', async (req, res) => {
   try {
     const produto_id = parseInt(req.params.produto_id);
     const { quantidade } = req.body;
-    const session = req.headers['session'];
+    const sessionId = req.headers['x-session-id'];  // ← MESMO HEADER!!!
 
-    // Validações básicas
-    if (!session) {
-      return res.status(400).json({ erro: 'Sessão não encontrada' });
-    }
-    if (!quantidade || quantidade < 0) {
-      return res.status(400).json({ erro: 'Quantidade inválida' });
-    }
+    if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
+    if (quantidade === undefined || quantidade < 0) return res.status(400).json({ erro: 'Quantidade inválida' });
 
     if (quantidade === 0) {
-      // Remove se for zero
-      await pool.query(
-        'DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2',
-        [session, produto_id]
-      );
+      // Remove do carrinho
+      const item = await pool.query('SELECT quantidade FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
+      if (item.rows.length > 0) {
+        await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [item.rows[0].quantidade, produto_id]);
+      }
+      await pool.query('DELETE FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
       return res.json({ sucesso: true });
     }
 
     // Atualiza quantidade
     const result = await pool.query(
-      `UPDATE carrinho 
-       SET quantidade = $1 
-       WHERE sessao = $2 AND produto_id = $3 
-       RETURNING *`,
-      [quantidade, session, produto_id]
+      'UPDATE carrinho SET quantidade = $1 WHERE session = $2 AND produto_id = $3 RETURNING *',
+      [quantidade, sessionId, produto_id]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
-    }
+    if (result.rowCount === 0) return res.status(404).json({ erro: 'Item não encontrado' });
 
     res.json({ sucesso: true });
   } catch (err) {
     console.error('ERRO NO PUT CARRINHO:', err);
-    res.status(500).json({ 
-      erro: 'Erro interno do servidor',
-      detalhes: err.message 
-    });
+    res.status(500).json({ erro: 'Erro interno', detalhes: err.message });
   }
 });
 
+
 // ==================== CARRINHO: REMOVER ITEM ====================
 app.delete('/api/carrinho/:produto_id', async (req, res) => {
-  const { produto_id } = req.params;
-  const sessao = req.headers['session'] || 'temp';
+  const produto_id = parseInt(req.params.produto_id);
+  const sessionId = req.headers['x-session-id'];  // ← MESMO HEADER!!!
+
+  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
 
   try {
-    // Pega a quantidade antes de deletar
     const item = await pool.query(
-      'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
-      [sessao, produto_id]
+      'SELECT quantidade FROM carrinho WHERE session = $1 AND produto_id = $2',
+      [sessionId, produto_id]
     );
 
-    if (item.rows.length === 0) {
-      return res.status(404).json({ erro: 'Item não encontrado no carrinho' });
-    }
+    if (item.rows.length === 0) return res.status(404).json({ erro: 'Item não encontrado' });
 
     const quantidadeRemovida = item.rows[0].quantidade;
 
-    // Remove do carrinho
-    await pool.query(
-      'DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2',
-      [sessao, produto_id]
-    );
-
-    // Devolve o estoque
-    await pool.query(
-      'UPDATE produtos SET estoque = estoque + $1 WHERE id = $2',
-      [quantidadeRemovida, produto_id]
-    );
+    await pool.query('DELETE FROM carrinho WHERE session = $1 AND produto_id = $2', [sessionId, produto_id]);
+    await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [quantidadeRemovida, produto_id]);
 
     res.json({ sucesso: true, mensagem: 'Removido do carrinho!' });
   } catch (err) {
