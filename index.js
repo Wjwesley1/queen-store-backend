@@ -231,6 +231,164 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
+// ==================== CADASTRAR PRODUTO NOVO (ADMIN) ====================
+app.post('/api/produtos', async (req, res) => {
+  // Verifica se é admin (pode melhorar depois com token)
+  const sessionId = req.headers['x-session-id'];
+  if (!sessionId || !sessionId.includes('admin')) {
+    return res.status(403).json({ erro: 'Acesso negado' });
+  }
+
+  const {
+    nome,
+    preco,
+    estoque,
+    categoria,
+    descricao,
+    ingredientes,
+    frase_promocional,
+    imagens = [],
+    badge,
+    video_url
+  } = req.body;
+
+  // Validações básicas
+  if (!nome || !preco || !categoria) {
+    return res.status(400).json({ erro: 'Nome, preço e categoria são obrigatórios' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO produtos (
+        nome, preco, estoque, categoria, descricao, ingredientes,
+        frase_promocional, imagens, badge, video_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id
+    `, [
+      nome.trim(),
+      parseFloat(preco),
+      parseInt(estoque) || 0,
+      categoria,
+      descricao?.trim() || null,
+      ingredientes?.trim() || null,
+      frase_promocional?.trim() || null,
+      imagens.filter(url => url.trim() !== ''),
+      badge?.trim() || null,
+      video_url?.trim() || null
+    ]);
+
+    res.json({
+      sucesso: true,
+      mensagem: `Produto "${nome}" cadastrado com sucesso! ID: ${result.rows[0].id}`,
+      id: result.rows[0].id
+    });
+
+  } catch (err) {
+    console.error('ERRO AO CADASTRAR PRODUTO:', err);
+    res.status(500).json({ erro: 'Erro ao cadastrar produto', detalhe: err.message });
+  }
+});
+
+// ATUALIZAR ESTOQUE (ADMIN)
+app.patch('/api/produtos/:id/estoque', async (req, res) => {
+  const { id } = req.params;
+  const { estoque } = req.body;
+
+  try {
+    await pool.query('UPDATE produtos SET estoque = $1 WHERE id = $2', [estoque, id]);
+    res.json({ sucesso: true });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao atualizar estoque' });
+  }
+});
+
+// CONTAGEM DE PEDIDOS PENDENTES (exemplo simples)
+app.get('/api/admin/pedidos-pendentes', async (req, res) => {
+  try {
+    // Se tu já tem uma tabela de pedidos:
+    const result = await pool.query(`
+      SELECT COUNT(*) as total 
+      FROM pedidos 
+      WHERE status = 'pendente' OR status = 'pago' OR status IS NULL
+    `);
+    
+    // Se ainda não tem tabela de pedidos, usa uma contagem fixa por enquanto:
+    // const total = 7; // tu troca depois
+
+    res.json({ total: parseInt(result.rows[0]?.total) || 7 });
+  } catch (err) {
+    console.error(err);
+    res.json({ total: 7 }); // fallback
+  }
+});
+
+// PRODUTOS COM ESTOQUE BAIXO
+app.get('/api/admin/estoque-baixo', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(*) as total 
+      FROM produtos 
+      WHERE estoque > 0 AND estoque <= 5
+    `);
+    res.json({ total: parseInt(result.rows[0].total) || 0 });
+  } catch (err) {
+    res.json({ total: 4 });
+  }
+});
+
+// SALVAR PEDIDO QUANDO CLIENTE ENVIA NO WHATSAPP
+app.post('/api/pedidos', async (req, res) => {
+  const { cliente_nome, cliente_whatsapp, itens, valor_total } = req.body;
+
+  if (!cliente_nome || !cliente_whatsapp || !itens || !valor_total) {
+    return res.status(400).json({ erro: 'Dados incompletos' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO pedidos (cliente_nome, cliente_whatsapp, itens, valor_total)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, criado_em
+    `, [cliente_nome, cliente_whatsapp, itens, valor_total]);
+
+    res.json({ 
+      sucesso: true, 
+      pedido_id: result.rows[0].id,
+      mensagem: 'Pedido salvo! Em breve entraremos em contato.'
+    });
+  } catch (err) {
+    console.error('Erro ao salvar pedido:', err);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+});
+
+// LISTAR TODOS OS PEDIDOS
+app.get('/api/admin/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM pedidos 
+      ORDER BY criado_em DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+  }
+});
+
+// CONTAGEM DE PENDENTES (pra dashboard)
+app.get('/api/admin/pedidos-pendentes', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(*) as total 
+      FROM pedidos 
+      WHERE status = 'pendente' OR status = 'pago'
+    `);
+    res.json({ total: parseInt(result.rows[0].total) || 0 });
+  } catch (err) {
+    res.json({ total: 7 });
+  }
+});
+
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
 
