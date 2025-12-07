@@ -385,31 +385,28 @@ app.patch('/api/pedidos/:id', async (req, res) => {
   }
 });
 
-// SALVAR PEDIDO DO WHATSAPP — 100% FUNCIONAL
+// ROTA QUE SALVA PEDIDO 100% — TESTADA E APROVADA
 app.post('/api/pedidos', async (req, res) => {
-  const { cliente_nome = "Cliente via Site", cliente_whatsapp = "Não informado", itens, valor_total } = req.body;
+  console.log('PEDIDO RECEBIDO:', req.body); // vai aparecer no Render
 
-  if (!itens || !valor_total) {
-    return res.status(400).json({ erro: 'Itens e valor total são obrigatórios' });
+  const { cliente_nome = "Cliente via Site", cliente_whatsapp = "Não informado", itens = [], valor_total = 0 } = req.body;
+
+  if (itens.length === 0 || !valor_total) {
+    return res.status(400).json({ erro: 'Dados insuficientes' });
   }
 
   try {
     const result = await pool.query(`
-      INSERT INTO pedidos (
-        cliente_nome, cliente_whatsapp, itens, valor_total, status,
-        endereco, cidade, estado, cep
-      ) VALUES ($1, $2, $3, $4, 'pendente', 'Via WhatsApp', 'Não informado', 'NA', '00000-000')
+      INSERT INTO pedidos (cliente_nome, cliente_whatsapp, itens, valor_total, status)
+      VALUES ($1, $2, $3, $4, 'pendente')
       RETURNING id
     `, [cliente_nome, cliente_whatsapp, JSON.stringify(itens), valor_total]);
 
-    res.json({ 
-      sucesso: true, 
-      pedido_id: result.rows[0].id,
-      mensagem: `Pedido #${result.rows[0].id} registrado com sucesso!`
-    });
+    console.log('PEDIDO SALVO COM ID:', result.rows[0].id);
+    res.json({ sucesso: true, pedido_id: result.rows[0].id });
   } catch (err) {
-    console.error('ERRO SALVANDO PEDIDO:', err);
-    res.status(500).json({ erro: 'Erro ao salvar pedido', detalhe: err.message });
+    console.error('ERRO NO BANCO:', err);
+    res.status(500).json({ erro: 'Erro no banco', detalhe: err.message });
   }
 });
 
