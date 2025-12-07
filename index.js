@@ -317,6 +317,28 @@ app.get('/api/admin/pedidos-pendentes', async (req, res) => {
   }
 });
 
+// LISTAR TODOS OS PEDIDOS
+app.get('/api/admin/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM pedidos ORDER BY criado_em DESC`);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+  }
+});
+
+// ATUALIZAR STATUS DO PEDIDO
+app.patch('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    await pool.query(`UPDATE pedidos SET status = $1, atualizado_em = NOW() WHERE id = $2`, [status, id]);
+    res.json({ sucesso: true });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao atualizar' });
+  }
+});
+
 // 2. PRODUTOS COM ESTOQUE BAIXO
 app.get('/api/admin/estoque-baixo', async (req, res) => {
   try {
