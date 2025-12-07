@@ -288,27 +288,32 @@ app.post('/api/produtos', async (req, res) => {
     res.status(500).json({ erro: 'Erro ao cadastrar produto', detalhe: err.message });
   }
 });
-
-// ATUALIZAR ESTOQUE (ADMIN)
+// ==================== ADMIN — ESTOQUE ====================
 app.patch('/api/produtos/:id/estoque', async (req, res) => {
   const { id } = req.params;
   const { estoque } = req.body;
+
+  if (estoque === undefined || estoque < 0) {
+    return res.status(400).json({ erro: 'Estoque inválido' });
+  }
 
   try {
     await pool.query('UPDATE produtos SET estoque = $1 WHERE id = $2', [estoque, id]);
     res.json({ sucesso: true });
   } catch (err) {
-    res.status(500).json({ erro: 'Erro ao atualizar estoque' });
+    console.error('Erro ao atualizar estoque:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// 1. PEDIDOS PENDENTES (DASHBOARD)
+// ==================== ADMIN — DASHBOARD ====================
+// 1. Pedidos pendentes
 app.get('/api/admin/pedidos-pendentes', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT COUNT(*) as total 
       FROM pedidos 
-      WHERE status = 'pendente' OR status = 'pago' OR status IS NULL
+      WHERE status IN ('pendente', 'pago') OR status IS NULL
     `);
     res.json({ total: parseInt(result.rows[0]?.total) || 0 });
   } catch (err) {
@@ -317,38 +322,7 @@ app.get('/api/admin/pedidos-pendentes', async (req, res) => {
   }
 });
 
-app.get('/api/admin/pedidos', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM pedidos ORDER BY criado_em DESC');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
-  }
-});
-
-// LISTAR TODOS OS PEDIDOS
-app.get('/api/admin/pedidos', async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM pedidos ORDER BY criado_em DESC`);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
-  }
-});
-
-// ATUALIZAR STATUS DO PEDIDO
-app.patch('/api/pedidos/:id', async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-  try {
-    await pool.query(`UPDATE pedidos SET status = $1, atualizado_em = NOW() WHERE id = $2`, [status, id]);
-    res.json({ sucesso: true });
-  } catch (err) {
-    res.status(500).json({ erro: 'Erro ao atualizar' });
-  }
-});
-
-// 2. PRODUTOS COM ESTOQUE BAIXO
+// 2. Produtos com estoque baixo
 app.get('/api/admin/estoque-baixo', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -363,49 +337,70 @@ app.get('/api/admin/estoque-baixo', async (req, res) => {
   }
 });
 
-// 3. FATURAMENTO DO DIA (exemplo real com carrinho)
+// 3. Faturamento do dia (soma tudo por enquanto)
 app.get('/api/admin/faturamento-hoje', async (req, res) => {
   try {
-    // Se não tem coluna criado_em, a gente ignora a data e soma tudo (ou usa uma data fixa)
     const result = await pool.query(`
-      SELECT COALESCE(SUM(quantidade * preco), 0) as total
+      SELECT COALESCE(SUM(c.quantidade * p.preco), 0) as total
       FROM carrinho c
       JOIN produtos p ON c.produto_id = p.id
     `);
-    
-    const total = parseFloat(result.rows[0].total) || 0;
-    res.json({ total });
+    res.json({ total: parseFloat(result.rows[0].total) || 0 });
   } catch (err) {
     console.error('Erro faturamento:', err);
-    res.json({ total: 1847.90 }); // fallback bonito
+    res.json({ total: 0 });
   }
 });
 
-// SALVAR PEDIDO QUANDO CLIENTE FINALIZA NO WHATSAPP
-app.post('/api/pedidos', async (req, res) => {
-  const { cliente_nome, cliente_whatsapp, itens, valor_total, endereco, cidade, estado, cep } = req.body;
+// ==================== PEDIDOS ====================
+// Listar todos os pedidos (admin)
+app.get('/api/admin/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pedidos ORDER BY criado_em DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao carregar pedidos:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
 
-  if (!cliente_nome || !cliente_whatsapp || !itens || !valor_total) {
-    return res.status(400).json({ erro: 'Dados incompletos' });
+// Atualizar status do pedido
+app.patch('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['pendente', 'pago', 'enviado', 'entregue', 'cancelado'].includes(status)) {
+    return res.status(400).json({ erro: 'Status inválido' });
+  }
+
+  try {
+    await pool.query(
+      'UPDATE pedidos SET status = $1, atualizado_em = NOW() WHERE id = $2',
+      [status, id]
+    );
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro ao atualizar pedido:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+// SALVAR PEDIDO DO WHATSAPP — 100% FUNCIONAL
+app.post('/api/pedidos', async (req, res) => {
+  const { cliente_nome = "Cliente via Site", cliente_whatsapp = "Não informado", itens, valor_total } = req.body;
+
+  if (!itens || !valor_total) {
+    return res.status(400).json({ erro: 'Itens e valor total são obrigatórios' });
   }
 
   try {
     const result = await pool.query(`
       INSERT INTO pedidos (
-        cliente_nome, cliente_whatsapp, itens, valor_total,
-        endereco, cidade, estado, cep, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendente')
+        cliente_nome, cliente_whatsapp, itens, valor_total, status,
+        endereco, cidade, estado, cep
+      ) VALUES ($1, $2, $3, $4, 'pendente', 'Via WhatsApp', 'Não informado', 'NA', '00000-000')
       RETURNING id
-    `, [
-      cliente_nome,
-      cliente_whatsapp,
-      JSON.stringify(itens),
-      valor_total,
-      endereco || 'Não informado',
-      cidade || 'Não informado',
-      estado || 'NA',
-      cep || '00000000'
-    ]);
+    `, [cliente_nome, cliente_whatsapp, JSON.stringify(itens), valor_total]);
 
     res.json({ 
       sucesso: true, 
@@ -413,8 +408,8 @@ app.post('/api/pedidos', async (req, res) => {
       mensagem: `Pedido #${result.rows[0].id} registrado com sucesso!`
     });
   } catch (err) {
-    console.error('ERRO AO SALVAR PEDIDO:', err);
-    res.status(500).json({ erro: 'Erro ao salvar pedido' });
+    console.error('ERRO SALVANDO PEDIDO:', err);
+    res.status(500).json({ erro: 'Erro ao salvar pedido', detalhe: err.message });
   }
 });
 
