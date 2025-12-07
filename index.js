@@ -302,27 +302,22 @@ app.patch('/api/produtos/:id/estoque', async (req, res) => {
   }
 });
 
-// CONTAGEM DE PEDIDOS PENDENTES (exemplo simples)
+// 1. PEDIDOS PENDENTES (DASHBOARD)
 app.get('/api/admin/pedidos-pendentes', async (req, res) => {
   try {
-    // Se tu já tem uma tabela de pedidos:
     const result = await pool.query(`
       SELECT COUNT(*) as total 
       FROM pedidos 
       WHERE status = 'pendente' OR status = 'pago' OR status IS NULL
     `);
-    
-    // Se ainda não tem tabela de pedidos, usa uma contagem fixa por enquanto:
-    // const total = 7; // tu troca depois
-
-    res.json({ total: parseInt(result.rows[0]?.total) || 7 });
+    res.json({ total: parseInt(result.rows[0]?.total) || 0 });
   } catch (err) {
-    console.error(err);
-    res.json({ total: 7 }); // fallback
+    console.error('Erro pedidos pendentes:', err);
+    res.json({ total: 0 });
   }
 });
 
-// PRODUTOS COM ESTOQUE BAIXO
+// 2. PRODUTOS COM ESTOQUE BAIXO
 app.get('/api/admin/estoque-baixo', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -332,60 +327,26 @@ app.get('/api/admin/estoque-baixo', async (req, res) => {
     `);
     res.json({ total: parseInt(result.rows[0].total) || 0 });
   } catch (err) {
-    res.json({ total: 4 });
+    console.error('Erro estoque baixo:', err);
+    res.json({ total: 0 });
   }
 });
 
-// SALVAR PEDIDO QUANDO CLIENTE ENVIA NO WHATSAPP
-app.post('/api/pedidos', async (req, res) => {
-  const { cliente_nome, cliente_whatsapp, itens, valor_total } = req.body;
-
-  if (!cliente_nome || !cliente_whatsapp || !itens || !valor_total) {
-    return res.status(400).json({ erro: 'Dados incompletos' });
-  }
-
+// 3. FATURAMENTO DO DIA (exemplo real com carrinho)
+app.get('/api/admin/faturamento-hoje', async (req, res) => {
   try {
+    const hoje = new Date().toISOString().split('T')[0];
     const result = await pool.query(`
-      INSERT INTO pedidos (cliente_nome, cliente_whatsapp, itens, valor_total)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, criado_em
-    `, [cliente_nome, cliente_whatsapp, itens, valor_total]);
-
-    res.json({ 
-      sucesso: true, 
-      pedido_id: result.rows[0].id,
-      mensagem: 'Pedido salvo! Em breve entraremos em contato.'
-    });
+      SELECT COALESCE(SUM(c.quantidade * p.preco), 0) as total
+      FROM carrinho c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE DATE(c.criado_em) = $1 OR c.criado_em IS NULL
+    `, [hoje]);
+    
+    res.json({ total: parseFloat(result.rows[0].total) || 0 });
   } catch (err) {
-    console.error('Erro ao salvar pedido:', err);
-    res.status(500).json({ erro: 'Erro interno' });
-  }
-});
-
-// LISTAR TODOS OS PEDIDOS
-app.get('/api/admin/pedidos', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT * FROM pedidos 
-      ORDER BY criado_em DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
-  }
-});
-
-// CONTAGEM DE PENDENTES (pra dashboard)
-app.get('/api/admin/pedidos-pendentes', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT COUNT(*) as total 
-      FROM pedidos 
-      WHERE status = 'pendente' OR status = 'pago'
-    `);
-    res.json({ total: parseInt(result.rows[0].total) || 0 });
-  } catch (err) {
-    res.json({ total: 7 });
+    console.error('Erro faturamento:', err);
+    res.json({ total: 0 });
   }
 });
 
