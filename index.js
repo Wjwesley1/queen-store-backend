@@ -413,6 +413,37 @@ app.post('/api/pedidos', async (req, res) => {
   }
 });
 
+// EDITAR PRODUTO COMPLETO
+app.patch('/api/produtos/:id', async (req, res) => {
+  const { id } = req.params;
+  const campos = req.body;
+
+  const camposPermitidos = ['nome', 'preco', 'estoque', 'categoria', 'descricao', 'badge', 'ingredientes', 'frase_promocional'];
+  const updates = [];
+  const values = [];
+  let index = 1;
+
+  Object.keys(campos).forEach(key => {
+    if (camposPermitidos.includes(key)) {
+      updates.push(`${key} = $${index}`);
+      values.push(campos[key]);
+      index++;
+    }
+  });
+
+  if (updates.length === 0) return res.status(400).json({ erro: 'Nenhum campo para atualizar' });
+
+  values.push(id);
+  const query = `UPDATE produtos SET ${updates.join(', ')}, atualizado_em = NOW() WHERE id = $${index}`;
+
+  pool.query(query, values)
+    .then(() => res.json({ sucesso: true }))
+    .catch(err => {
+      console.error('Erro ao editar produto:', err);
+      res.status(500).json({ erro: 'Erro no servidor' });
+    });
+});
+
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
 
