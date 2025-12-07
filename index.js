@@ -317,6 +317,15 @@ app.get('/api/admin/pedidos-pendentes', async (req, res) => {
   }
 });
 
+app.get('/api/admin/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pedidos ORDER BY criado_em DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+  }
+});
+
 // LISTAR TODOS OS PEDIDOS
 app.get('/api/admin/pedidos', async (req, res) => {
   try {
@@ -372,30 +381,39 @@ app.get('/api/admin/faturamento-hoje', async (req, res) => {
   }
 });
 
-// RECEBE PEDIDO DO WHATSAPP E SALVA NO BANCO
-app.post('/api/pedidos/whatsapp', async (req, res) => {
-  const { nome, whatsapp, itens, valor_total } = req.body;
+// SALVAR PEDIDO QUANDO CLIENTE FINALIZA NO WHATSAPP
+app.post('/api/pedidos', async (req, res) => {
+  const { cliente_nome, cliente_whatsapp, itens, valor_total, endereco, cidade, estado, cep } = req.body;
 
-  if (!nome || !whatsapp || !itens || !valor_total) {
-    return res.status(400).json({ erro: 'Faltam dados' });
+  if (!cliente_nome || !cliente_whatsapp || !itens || !valor_total) {
+    return res.status(400).json({ erro: 'Dados incompletos' });
   }
 
   try {
     const result = await pool.query(`
-      INSERT INTO pedidos (cliente_nome, cliente_whatsapp, itens, valor_total, status)
-      VALUES ($1, $2, $3, $4, 'pendente')
-      RETURNING id, criado_em
-    `, [nome, whatsapp, JSON.stringify(itens), valor_total]);
-
-    const pedidoId = result.rows[0].id;
+      INSERT INTO pedidos (
+        cliente_nome, cliente_whatsapp, itens, valor_total,
+        endereco, cidade, estado, cep, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendente')
+      RETURNING id
+    `, [
+      cliente_nome,
+      cliente_whatsapp,
+      JSON.stringify(itens),
+      valor_total,
+      endereco || 'Não informado',
+      cidade || 'Não informado',
+      estado || 'NA',
+      cep || '00000000'
+    ]);
 
     res.json({ 
       sucesso: true, 
-      pedido_id: pedidoId,
-      mensagem: `Pedido #${pedidoId} recebido! Em breve entraremos em contato.`
+      pedido_id: result.rows[0].id,
+      mensagem: `Pedido #${result.rows[0].id} registrado com sucesso!`
     });
   } catch (err) {
-    console.error('Erro ao salvar pedido WhatsApp:', err);
+    console.error('ERRO AO SALVAR PEDIDO:', err);
     res.status(500).json({ erro: 'Erro ao salvar pedido' });
   }
 });
