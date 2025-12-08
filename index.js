@@ -369,7 +369,7 @@ app.patch('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['pendente', 'pago', 'enviado', 'entregue', 'cancelado'].includes(status)) {
+  if (!['pendente', 'pago', 'enviado', 'entregue', 'cancelado', 'concluido'].includes(status)) {
     return res.status(400).json({ erro: 'Status inválido' });
   }
 
