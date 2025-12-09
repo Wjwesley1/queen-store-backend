@@ -465,23 +465,27 @@ app.patch('/api/produtos/:id', async (req, res) => {
 });
 
 // ==================== ENVIO DE EMAILS COM ZOHO MAIL ====================
-// CONFIGURAÇÃO ZOHO MAIL
 const transporter = nodemailer.createTransport({
   host: 'smtp.zoho.com',
   port: 587,
-  secure: false,                    // FALSE pra 587
-  requireTLS: true,                 // FORÇA STARTTLS (obrigatório pro Zoho)
+  secure: false,  // STARTTLS
+  requireTLS: true,  // FORÇA STARTTLS
   auth: {
     user: process.env.ZOHO_EMAIL,
     pass: process.env.ZOHO_APP_PASSWORD
   },
+  pool: true,  // POOLING PRA RENDER (evita timeout)
+  maxConnections: 5,
+  maxMessages: 100,
+  connectionTimeout: 30000,  // 30 SEGUNDOS (Render precisa mais tempo)
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
+  logger: true,  // LOGS PRA DEBUG
+  debug: true,  // DEBUG PRA VER O QUE ACONTECE
   tls: {
     rejectUnauthorized: false,
     minVersion: 'TLSv1.2'
-  },
-  connectionTimeout: 10000,         // 10 segundos
-  greetingTimeout: 10000,
-  socketTimeout: 10000
+  }
 });
 
 // TESTE FORTE DE CONEXÃO
