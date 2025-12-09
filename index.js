@@ -4,6 +4,7 @@
 require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
+const nodemailer = require('nodemailer');
 
 const app = express();
 
@@ -364,23 +365,34 @@ app.get('/api/admin/pedidos', async (req, res) => {
   }
 });
 
-// Atualizar status do pedido
 app.patch('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['pendente', 'pago', 'enviado', 'entregue', 'cancelado', 'concluido'].includes(status)) {
+  const statusValidos = ['pendente', 'pago', 'enviado', 'entregue', 'concluido'];
+  if (!statusValidos.includes(status)) {
     return res.status(400).json({ erro: 'Status inválido' });
   }
 
   try {
+    // Atualiza no banco
     await pool.query(
       'UPDATE pedidos SET status = $1, atualizado_em = NOW() WHERE id = $2',
       [status, id]
     );
+
+    // BUSCA O PEDIDO PRA PEGAR EMAIL E NOME
+    const result = await pool.query('SELECT * FROM pedidos WHERE id = $1', [id]);
+    const pedido = result.rows[0];
+
+    // ENVIA EMAIL AUTOMÁTICO
+    if (['pago', 'enviado', 'entregue', 'concluido'].includes(status)) {
+      enviarEmailStatus(pedido.cliente_email, pedido.cliente_nome, pedido.id, status);
+    }
+
     res.json({ sucesso: true });
   } catch (err) {
-    console.error('Erro ao atualizar pedido:', err);
+    console.error('Erro ao atualizar:', err);
     res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
@@ -451,6 +463,74 @@ app.patch('/api/produtos/:id', async (req, res) => {
       res.status(500).json({ erro: 'Erro no servidor' });
     });
 });
+
+// ==================== ENVIO DE EMAILS COM ZOHO MAIL ====================
+// CONFIGURAÇÃO ZOHO MAIL
+const transporter = nodemailer.createTransport({
+  host: 'smtp.zoho.com',
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.ZOHO_EMAIL,
+    pass: process.env.ZOHO_APP_PASSWORD
+  },
+  tls: { rejectUnauthorized: false }
+});
+
+// TESTE DE CONEXÃO
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('Erro Zoho Mail:', error);
+  } else {
+    console.log('Zoho Mail conectado e pronto pra enviar emails!');
+  }
+});
+
+// FUNÇÃO DE ENVIO DE EMAIL (linda e com .env)
+const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status) => {
+  if (!cliente_email || cliente_email === 'Não informado') return;
+
+  const statusConfig = {
+    pago: { assunto: 'Pagamento confirmado!', titulo: 'Seu pedido foi pago e está em produção!' },
+    enviado: { assunto: 'Seu pedido foi enviado!', titulo: 'Já está a caminho, rainha!' },
+    entregue: { assunto: 'Pedido entregue!', titulo: 'Chegou com amor!' },
+    concluido: { assunto: 'Pedido concluído!', titulo: 'Obrigada por comprar com a gente!' }
+  };
+
+  const config = statusConfig[status] || statusConfig.pago;
+
+  const html = `
+    <div style="font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px; background: linear-gradient(135deg, #fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+      <h1 style="color: #0F1B3F; font-size: 36px; margin-bottom: 10px;">Queen Store</h1>
+      <p style="color: #8B00D7; font-size: 22px; margin-bottom: 30px;">Atualização do seu pedido</p>
+      
+      <div style="background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(139,0,215,0.1); margin: 30px 0;">
+        <p style="font-size: 20px; color: #0F1B3F;">Olá, <strong>${cliente_nome}</strong>!</p>
+        <h2 style="font-size: 32px; color: #8B00D7; margin: 30px 0;">${config.titulo}</h2>
+        <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedido_id}</p>
+      </div>
+
+      <p style="font-size: 18px; color: #0F1B3F;">
+        Qualquer dúvida, responde esse email ou chama no WhatsApp: (31) 97255-2077
+      </p>
+      <p style="color: #8B00D7; font-size: 20px; margin-top: 40px;">
+        Com carinho,<br><strong>Queen Store</strong>
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: `"Queen Store" <${process.env.ZOHO_EMAIL}>`,
+      to: cliente_email,
+      subject: config.assunto,
+      html: html
+    });
+    console.log(`Email enviado para ${cliente_email}`);
+  } catch (err) {
+    console.error('Erro ao enviar email:', err);
+  }
+};
 
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
