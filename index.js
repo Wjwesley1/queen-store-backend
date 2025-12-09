@@ -468,8 +468,8 @@ app.patch('/api/produtos/:id', async (req, res) => {
 // CONFIGURAÇÃO ZOHO MAIL
 const transporter = nodemailer.createTransport({
   host: 'smtp.zoho.com',
-  port: 587,
-  secure: false,
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.ZOHO_EMAIL,
     pass: process.env.ZOHO_APP_PASSWORD
