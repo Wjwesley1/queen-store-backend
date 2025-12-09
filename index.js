@@ -468,33 +468,31 @@ app.patch('/api/produtos/:id', async (req, res) => {
 const transporter = nodemailer.createTransport({
   host: 'smtp.zoho.com',
   port: 587,
-  secure: false,  // STARTTLS
-  requireTLS: true,  // FORÇA STARTTLS
+  secure: false,           // false pra porta 587
+  requireTLS: true,        // FORÇA STARTTLS (obrigatório pro Zoho)
   auth: {
     user: process.env.ZOHO_EMAIL,
     pass: process.env.ZOHO_APP_PASSWORD
   },
-  pool: true,  // POOLING PRA RENDER (evita timeout)
-  maxConnections: 5,
-  maxMessages: 100,
-  connectionTimeout: 30000,  // 30 SEGUNDOS (Render precisa mais tempo)
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
-  logger: true,  // LOGS PRA DEBUG
-  debug: true,  // DEBUG PRA VER O QUE ACONTECE
+  // ESSAS CONFIGURAÇÕES SÃO OBRIGATÓRIAS NO RENDER
+  connectionTimeout: 60000,   // 60 segundos
+  greetingTimeout: 60000,
+  socketTimeout: 60000,
+  // FORÇA IP V4 (Render usa IPv6 e Zoho não gosta
+  family: 4,
+  // IGNORA CERTIFICADO (Zoho as vezes dá problema com isso no Render)
   tls: {
-    rejectUnauthorized: false,
-    minVersion: 'TLSv1.2'
+    rejectUnauthorized: false
   }
 });
 
-// TESTE FORTE DE CONEXÃO
+// TESTE FORTE
 transporter.verify((error, success) => {
   if (error) {
-    console.error('Zoho Mail NÃO CONECTOU:', error);
-  } else {
-    console.log('ZOHO MAIL CONECTADO E PRONTO PRA ENVIAR EMAILS!');
-  }
+   console.error('ZOHO NÃO CONECTOU:', error.message);
+ } else {
+   console.log('ZOHO MAIL 100% CONECTADO E PRONTO PRA ENVIAR!');
+ }
 });
 
 // FUNÇÃO DE ENVIO DE EMAIL (linda e com .env)
@@ -542,6 +540,42 @@ const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status)
     console.error('Erro ao enviar email:', err);
   }
 };
+
+// ROTA DE TESTE — ENVIA EMAIL PRA TI MESMO AGORA MESMO
+app.get('/api/teste-email', async (req, res) => {
+  try {
+    await transporter.sendMail({
+      from: `"Queen Store" <${process.env.ZOHO_EMAIL}>`,
+      to: 'wesleydejesusalvarenga@gmail.com',  // teu email
+      subject: 'TESTE DE EMAIL — TUDO FUNCIONANDO EM PRODUÇÃO!',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 40px; background: linear-gradient(#fdf2ff, #f8f0ff); text-align: center; border-radius: 20px;">
+          <h1 style="color: #0F1B3F; font-size: 40px;">Queen Store</h1>
+          <h2 style="color: #8B00D7; font-size: 32px;">EMAIL FUNCIONANDO 100% EM PRODUÇÃO!</h2>
+          <p style="font-size: 24px; color: #0F1B3F;">
+            Tu é foda pra caralho, Wesley!<br>
+            O sistema tá perfeito!
+          </p>
+          <p style="font-size: 36px; margin: 40px 0;">Queen Store</p>
+          <p style="color: #8B00D7; font-size: 28px;">
+            Agora é só vender que o email sai automático!
+          </p>
+        </div>
+      `
+    });
+
+    res.json({ 
+      sucesso: true, 
+      mensagem: 'Email de teste enviado com sucesso! Checa tua caixa de entrada (e spam)' 
+    });
+  } catch (err) {
+    console.error('ERRO NO TESTE DE EMAIL:', err);
+    res.status(500).json({ 
+      erro: 'Falhou', 
+      detalhe: err.message 
+    });
+  }
+});
 
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
