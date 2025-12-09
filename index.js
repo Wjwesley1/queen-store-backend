@@ -466,7 +466,7 @@ app.patch('/api/produtos/:id', async (req, res) => {
 
 // ==================== ENVIO DE EMAILS COM ZOHO MAIL ====================
 const transporter = nodemailer.createTransport({
-  host: 'smtp.zoho.com',
+  host: 'smtp.zoho.eu',
   port: 587,
   secure: false,           // false pra porta 587
   requireTLS: true,        // FORÇA STARTTLS (obrigatório pro Zoho)
