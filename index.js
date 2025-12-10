@@ -4,7 +4,7 @@
 require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 
 const app = express();
 
@@ -464,38 +464,10 @@ app.patch('/api/produtos/:id', async (req, res) => {
     });
 });
 
-// ==================== ENVIO DE EMAILS COM ZOHO MAIL ====================
-const transporter = nodemailer.createTransport({
-  host: 'https://www.mail.zoho.com',
-  port: 587,
-  secure: false,           // false pra porta 587
-  requireTLS: true,        // FORÇA STARTTLS (obrigatório pro Zoho)
-  auth: {
-    user: process.env.ZOHO_EMAIL,
-    pass: process.env.ZOHO_APP_PASSWORD
-  },
-  // ESSAS CONFIGURAÇÕES SÃO OBRIGATÓRIAS NO RENDER
-  connectionTimeout: 60000,   // 60 segundos
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
-  // FORÇA IP V4 (Render usa IPv6 e Zoho não gosta
-  family: 4,
-  // IGNORA CERTIFICADO (Zoho as vezes dá problema com isso no Render)
-  tls: {
-    rejectUnauthorized: false
-  }
-});
+// SUBSTITUI TODO O NODEMAILER POR ESSE CÓDIGO (MUDA SÓ ISSO AQUI PRA USAR SENDGRID)
 
-// TESTE FORTE
-transporter.verify((error, success) => {
-  if (error) {
-   console.error('ZOHO NÃO CONECTOU:', error.message);
- } else {
-   console.log('ZOHO MAIL 100% CONECTADO E PRONTO PRA ENVIAR!');
- }
-});
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// FUNÇÃO DE ENVIO DE EMAIL (linda e com .env)
 const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status) => {
   if (!cliente_email || cliente_email === 'Não informado') return;
 
