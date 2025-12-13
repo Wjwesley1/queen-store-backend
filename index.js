@@ -398,13 +398,14 @@ app.patch('/api/pedidos/:id', async (req, res) => {
   }
 });
 
-// SALVAR PEDIDO DO WHATSAPP — VERSÃO INDESTRUTÍVEL
+// SALVAR PEDIDO COM EMAIL DO CLIENTE — VERSÃO QUE SALVA TUDO
 app.post('/api/pedidos', async (req, res) => {
   console.log('PEDIDO RECEBIDO:', req.body);
 
   const { 
     cliente_nome = "Cliente via WhatsApp", 
     cliente_whatsapp = "Não informado", 
+    cliente_email = "Não informado",
     itens = [], 
     valor_total = 0 
   } = req.body;
@@ -416,16 +417,16 @@ app.post('/api/pedidos', async (req, res) => {
   try {
     const result = await pool.query(`
       INSERT INTO pedidos (
-        cliente_nome, cliente_whatsapp, itens, valor_total, status,
+        cliente_nome, cliente_whatsapp, cliente_email, itens, valor_total, status,
         endereco, cidade, estado, cep, forma_pagamento
       ) VALUES (
-        $1, $2, $3, $4, 'pendente',
+        $1, $2, $3, $4, $5, 'pendente',
         'Endereço via WhatsApp', 'Cidade via WhatsApp', 'NA', '00000-000', 'PIX'
       )
       RETURNING id
-    `, [cliente_nome, cliente_whatsapp, JSON.stringify(itens), valor_total]);
+    `, [cliente_nome, cliente_whatsapp, cliente_email, JSON.stringify(itens), valor_total]);
 
-    console.log('PEDIDO SALVO COM ID:', result.rows[0].id);
+    console.log('PEDIDO SALVO COM ID:', result.rows[0].id, 'EMAIL:', cliente_email);
     res.json({ sucesso: true, pedido_id: result.rows[0].id });
 
   } catch (err) {
