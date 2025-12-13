@@ -4,9 +4,10 @@
 require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
-const sgMail = require('@sendgrid/mail');
+const brevo = require('@getbrevo/brevo');
 
 const app = express();
+const apiInstance = new brevo.TransactionalEmailsApi();
 
 // ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
 app.use((req, res, next) => {
@@ -466,50 +467,48 @@ app.patch('/api/produtos/:id', async (req, res) => {
 
 // SUBSTITUI TODO O NODEMAILER POR ESSE CÓDIGO (MUDA SÓ ISSO AQUI PRA USAR SENDGRID)
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
 
 const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status) => {
-  if (!cliente_email || cliente_email === 'Não informado') return;
+  if (!cliente_email || cliente_email === 'Não informado' || !cliente_email.includes('@')) {
+    console.log('Email inválido, pulando envio:', cliente_email);
+    return;
+  }
 
   const statusConfig = {
     pago: { assunto: 'Pagamento confirmado!', titulo: 'Seu pedido foi pago e está em produção!' },
     enviado: { assunto: 'Seu pedido foi enviado!', titulo: 'Já está a caminho, rainha!' },
     entregue: { assunto: 'Pedido entregue!', titulo: 'Chegou com amor!' },
-    concluido: { assunto: 'Pedido concluído!', titulo: 'Obrigada por comprar com a gente!' }
+    concluido: { assunto: 'Pedido concluído!', titulo: 'Obrigada por comprar na Queen Store!' }
   };
 
-  const config = statusConfig[status] || statusConfig.pago;
+  const { assunto, titulo } = statusConfig[status] || statusConfig.pago;
 
   const html = `
-    <div style="font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px; background: linear-gradient(135deg, #fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
-      <h1 style="color: #0F1B3F; font-size: 36px; margin-bottom: 10px;">Queen Store</h1>
-      <p style="color: #8B00D7; font-size: 22px; margin-bottom: 30px;">Atualização do seu pedido</p>
-      
-      <div style="background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(139,0,215,0.1); margin: 30px 0;">
-        <p style="font-size: 20px; color: #0F1B3F;">Olá, <strong>${cliente_nome}</strong>!</p>
-        <h2 style="font-size: 32px; color: #8B00D7; margin: 30px 0;">${config.titulo}</h2>
-        <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedido_id}</p>
-      </div>
-
-      <p style="font-size: 18px; color: #0F1B3F;">
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+      <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
+      <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${cliente_nome}</strong>!</p>
+      <h2 style="font-size: 32px; color: #8B00D7;">${titulo}</h2>
+      <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedido_id}</p>
+      <p style="font-size: 18px; color: #0F1B3F; margin-top: 40px;">
         Qualquer dúvida, responde esse email ou chama no WhatsApp: (31) 97255-2077
       </p>
-      <p style="color: #8B00D7; font-size: 20px; margin-top: 40px;">
-        Com carinho,<br><strong>Queen Store</strong>
-      </p>
+      <p style="color: #8B00D7; font-size: 22px;">Com carinho,<br><strong>Queen Store</strong></p>
     </div>
   `;
 
+  const sendSmtpEmail = {
+    to: [{ email: cliente_email, name: cliente_nome }],
+    sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
+    subject: assunto,
+    htmlContent: html
+  };
+
   try {
-    await transporter.sendMail({
-      from: `"Queen Store" <${process.env.ZOHO_EMAIL}>`,
-      to: cliente_email,
-      subject: config.assunto,
-      html: html
-    });
-    console.log(`Email enviado para ${cliente_email}`);
+    await apiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log(`EMAIL BREVO ENVIADO → ${cliente_email} | Pedido #${pedido_id}`);
   } catch (err) {
-    console.error('Erro ao enviar email:', err);
+    console.error('Erro Brevo:', err.body || err.message);
   }
 };
 
