@@ -5,9 +5,15 @@ require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
 const brevo = require('@getbrevo/brevo');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 const apiInstance = new brevo.TransactionalEmailsApi();
+const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025'; // COLOCA NO .env DO RENDER!!!
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
+
 
 // ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
 app.use((req, res, next) => {
@@ -513,40 +519,161 @@ const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status)
   }
 };
 
-// ROTA DE TESTE — ENVIA EMAIL PRA TI MESMO AGORA MESMO
-app.get('/api/teste-email', async (req, res) => {
+// REGISTRO (EMAIL + SENHA)
+app.post('/api/auth/register', async (req, res) => {
+  const { nome, email, senha } = req.body;
+
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ erro: 'Preencha todos os campos' });
+  }
+
   try {
-    await transporter.sendMail({
-      from: `"Queen Store" <${process.env.ZOHO_EMAIL}>`,
-      to: 'wesleydejesusalvarenga@gmail.com',  // teu email
-      subject: 'TESTE DE EMAIL — TUDO FUNCIONANDO EM PRODUÇÃO!',
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 40px; background: linear-gradient(#fdf2ff, #f8f0ff); text-align: center; border-radius: 20px;">
-          <h1 style="color: #0F1B3F; font-size: 40px;">Queen Store</h1>
-          <h2 style="color: #8B00D7; font-size: 32px;">EMAIL FUNCIONANDO 100% EM PRODUÇÃO!</h2>
-          <p style="font-size: 24px; color: #0F1B3F;">
-            Tu é foda pra caralho, Wesley!<br>
-            O sistema tá perfeito!
-          </p>
-          <p style="font-size: 36px; margin: 40px 0;">Queen Store</p>
-          <p style="color: #8B00D7; font-size: 28px;">
-            Agora é só vender que o email sai automático!
-          </p>
-        </div>
-      `
+    // Verifica se email já existe
+    const check = await pool.query('SELECT id FROM clientes WHERE email = $1', [email.toLowerCase()]);
+    if (check.rows.length > 0) {
+      return res.status(400).json({ erro: 'Email já cadastrado' });
+    }
+
+    // Criptografa senha
+    const senhaHash = await bcrypt.hash(senha, 10);
+
+    // Insere cliente
+    const result = await pool.query(`
+      INSERT INTO clientes (nome, email, senha_hash)
+      VALUES ($1, $2, $3)
+      RETURNING id, nome, email
+    `, [nome, email.toLowerCase(), senhaHash]);
+
+    const cliente = result.rows[0];
+
+    // Gera JWT
+    const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.json({ sucesso: true, token, cliente });
+  } catch (err) {
+    console.error('Erro no registro:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+// LOGIN (EMAIL + SENHA)
+app.post('/api/auth/login', async (req, res) => {
+  const { email, senha } = req.body;
+
+  if (!email || !senha) {
+    return res.status(400).json({ erro: 'Email e senha obrigatórios' });
+  }
+
+  try {
+    const result = await pool.query('SELECT * FROM clientes WHERE email = $1', [email.toLowerCase()]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ erro: 'Email ou senha incorretos' });
+    }
+
+    const cliente = result.rows[0];
+
+    // Se logou só com Google, não tem senha
+    if (!cliente.senha_hash) {
+      return res.status(400).json({ erro: 'Essa conta usa login com Google' });
+    }
+
+    const senhaValida = await bcrypt.compare(senha, cliente.senha_hash);
+    if (!senhaValida) {
+      return res.status(400).json({ erro: 'Email ou senha incorretos' });
+    }
+
+    const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.json({ sucesso: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
+  } catch (err) {
+    console.error('Erro no login:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+// LOGIN COM GOOGLE
+app.post('/api/auth/google', async (req, res) => {
+  const { token } = req.body; // token do Google vindo do frontend
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.REACT_APP_GOOGLE_CLIENT_ID
     });
 
-    res.json({ 
-      sucesso: true, 
-      mensagem: 'Email de teste enviado com sucesso! Checa tua caixa de entrada (e spam)' 
-    });
+    const payload = ticket.getPayload();
+    const googleId = payload['sub'];
+    const email = payload['email'];
+    const nome = payload['name'] || email.split('@')[0];
+
+    // Busca ou cria cliente
+    let result = await pool.query('SELECT * FROM clientes WHERE google_id = $1 OR email = $2', [googleId, email]);
+    let cliente = result.rows[0];
+
+    if (!cliente) {
+      // Cria novo cliente
+      result = await pool.query(`
+        INSERT INTO clientes (nome, email, google_id)
+        VALUES ($1, $2, $3)
+        RETURNING id, nome, email
+      `, [nome, email, googleId]);
+
+      cliente = result.rows[0];
+    } else if (!cliente.google_id) {
+      // Vincula Google à conta existente
+      await pool.query('UPDATE clientes SET google_id = $1 WHERE id = $2', [googleId, cliente.id]);
+      cliente.google_id = googleId;
+    }
+
+    const jwtToken = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.json({ sucesso: true, token: jwtToken, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
   } catch (err) {
-    console.error('ERRO NO TESTE DE EMAIL:', err);
-    res.status(500).json({ 
-      erro: 'Falhou', 
-      detalhe: err.message 
-    });
+    console.error('Erro login Google:', err);
+    res.status(400).json({ erro: 'Token Google inválido' });
   }
+});
+
+// MIDDLEWARE PRA PROTEGER ROTAS
+const autenticar = async (req, res, next) => {
+  const token = req.headers.authorization?.split('Bearer ')[1];
+
+  if (!token) {
+    return res.status(401).json({ erro: 'Token não fornecido' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const result = await pool.query('SELECT id, nome, email FROM clientes WHERE id = $1', [decoded.clienteId]);
+    if (result.rows.length === 0) {
+      return res.status(401).json({ erro: 'Cliente não encontrado' });
+    }
+
+    req.cliente = result.rows[0];
+    next();
+  } catch (err) {
+    res.status(401).json({ erro: 'Token inválido' });
+  }
+};
+
+// EXEMPLO DE ROTA PROTEGIDA — HISTÓRICO DE PEDIDOS DO CLIENTE
+app.get('/api/cliente/pedidos', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM pedidos 
+      WHERE cliente_email = $1 OR cliente_whatsapp = $2
+      ORDER BY criado_em DESC
+    `, [req.cliente.email, req.cliente.whatsapp || '']);
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+  }
+});
+
+// ROTA PRA PEGAR DADOS DO CLIENTE LOGADO
+app.get('/api/cliente/perfil', autenticar, async (req, res) => {
+  res.json({ cliente: req.cliente });
 });
 
 // ==================== INICIA O SERVIDOR ====================
