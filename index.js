@@ -549,7 +549,7 @@ app.post('/api/auth/register', async (req, res) => {
     // Gera JWT
     const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
 
-    res.json({ sucesso: true, token, cliente });
+    res.json({ sucesso: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email }});
   } catch (err) {
     console.error('Erro no registro:', err);
     res.status(500).json({ erro: 'Erro no servidor' });
@@ -627,7 +627,7 @@ app.post('/api/auth/google', async (req, res) => {
 
     const jwtToken = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
 
-    res.json({ sucesso: true, token: jwtToken, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
+    res.json({ sucesso: true, token: jwtToken, cliente: { id: cliente.id, nome: cliente.nome || nome, email: cliente.email || email }});
   } catch (err) {
     console.error('Erro login Google:', err);
     res.status(400).json({ erro: 'Token Google inválido' });
