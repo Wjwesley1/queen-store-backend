@@ -17,30 +17,39 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
 // ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
-app.use((req, res, next) => {
-  // Libera o domínio que tá acessando (ou * se quiser)
-  const origin = req.headers.origin;
-  if (origin) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permite localhost (dev) e teu domínio de produção
+    const allowed = [
+      'http://localhost:3000',
+      'http://localhost:5173', // Vite padrão
+      'https://queen-store-frontend.vercel.app', // produção
+      'https://queen-store-frontend.onrender.com',
+      'https://www.queenstore.store',
+      'https://queenstore.store' // se tiver deploy no Render
+    ];
 
-  // Métodos permitidos
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    if (!origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-session-id',
+    'X-Session-Id',
+    'Origin',
+    'Accept'
+  ],
+  credentials: true,           // importante se usar cookies/sessão
+  preflightContinue: false,
+  optionsSuccessStatus: 204    // Responde 204 para OPTIONS (muitos browsers precisam)
+}));
 
-  // HEADERS PERMITIDOS — AQUI TAVA O PROBLEMA!!!
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-session-id, X-Session-Id');
-
-  // Permite credenciais (importante pro header customizado)
-  res.header('Access-Control-Allow-Credentials', 'true');
-
-  // Responde OPTIONS na hora (preflight)
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-
-  next();
-});
-
+// Coloca isso DEPOIS do CORS, ANTES das rotas
 app.use(express.json());
 
 // ==================== CONEXÃO COM NEON.TECH (PostgreSQL) ====================
