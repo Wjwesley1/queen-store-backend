@@ -8,13 +8,12 @@ const brevo = require('@getbrevo/brevo');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
-const CORS = require('cors');
 
 const app = express();
 const apiInstance = new brevo.TransactionalEmailsApi();
 const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
-
+const cors = require('cors');
 
 // ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
 app.use(cors({
