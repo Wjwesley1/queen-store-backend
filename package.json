@@ -35,7 +35,7 @@
     "express": "^4.21.1",
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^7.0.11",
+    "nodemailer": "^7.0.12",
     "pg": "^8.13.0"
   },
   "engines": {

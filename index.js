@@ -11,7 +11,7 @@ const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 const apiInstance = new brevo.TransactionalEmailsApi();
-const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025'; // COLOCA NO .env DO RENDER!!!
+const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
 
 
@@ -472,87 +472,69 @@ app.patch('/api/produtos/:id', async (req, res) => {
     });
 });
 
-// SUBSTITUI TODO O NODEMAILER POR ESSE CÓDIGO (MUDA SÓ ISSO AQUI PRA USAR SENDGRID)
+// REENVIO DE EMAIL DE VERIFICAÇÃO
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const { email } = req.body;
 
-apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
-
-const enviarEmailStatus = async (cliente_email, cliente_nome, pedido_id, status) => {
-  if (!cliente_email || cliente_email === 'Não informado' || !cliente_email.includes('@')) {
-    console.log('Email inválido, pulando envio:', cliente_email);
-    return;
-  }
-
-  const statusConfig = {
-    pago: { assunto: 'Pagamento confirmado!', titulo: 'Seu pedido foi pago e está em produção!' },
-    enviado: { assunto: 'Seu pedido foi enviado!', titulo: 'Já está a caminho, rainha!' },
-    entregue: { assunto: 'Pedido entregue!', titulo: 'Chegou com amor!' },
-    concluido: { assunto: 'Pedido concluído!', titulo: 'Obrigada por comprar na Queen Store!' }
-  };
-
-  const { assunto, titulo } = statusConfig[status] || statusConfig.pago;
-
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
-      <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
-      <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${cliente_nome}</strong>!</p>
-      <h2 style="font-size: 32px; color: #8B00D7;">${titulo}</h2>
-      <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedido_id}</p>
-      <p style="font-size: 18px; color: #0F1B3F; margin-top: 40px;">
-        Qualquer dúvida, responde esse email ou chama no WhatsApp: (31) 97255-2077
-      </p>
-      <p style="color: #8B00D7; font-size: 22px;">Com carinho,<br><strong>Queen Store</strong></p>
-    </div>
-  `;
-
-  const sendSmtpEmail = {
-    to: [{ email: cliente_email, name: cliente_nome }],
-    sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
-    subject: assunto,
-    htmlContent: html
-  };
-
-  try {
-    await apiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log(`EMAIL BREVO ENVIADO → ${cliente_email} | Pedido #${pedido_id}`);
-  } catch (err) {
-    console.error('Erro Brevo:', err.body || err.message);
-  }
-};
-
-// REGISTRO (EMAIL + SENHA)
-app.post('/api/auth/register', async (req, res) => {
-  const { nome, email, senha } = req.body;
-
-  if (!nome || !email || !senha) {
-    return res.status(400).json({ erro: 'Preencha todos os campos' });
+  if (!email) {
+    return res.status(400).json({ erro: 'Email obrigatório' });
   }
 
   try {
-    // Verifica se email já existe
-    const check = await pool.query('SELECT id FROM clientes WHERE email = $1', [email.toLowerCase()]);
-    if (check.rows.length > 0) {
-      return res.status(400).json({ erro: 'Email já cadastrado' });
+    const result = await pool.query(`
+      SELECT id, nome, is_verified 
+      FROM clientes 
+      WHERE email = $1
+    `, [email.toLowerCase()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ erro: 'Email não encontrado' });
     }
 
-    // Criptografa senha
-    const senhaHash = await bcrypt.hash(senha, 10);
+    const user = result.rows[0];
 
-    // Insere cliente
-    const result = await pool.query(`
-      INSERT INTO clientes (nome, email, senha_hash)
-      VALUES ($1, $2, $3)
-      RETURNING id, nome, email
-    `, [nome, email.toLowerCase(), senhaHash]);
+    if (user.is_verified) {
+      return res.status(400).json({ erro: 'Conta já verificada' });
+    }
 
-    const cliente = result.rows[0];
+    // Novo token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
-    // Gera JWT
-    const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+    await pool.query(`
+      UPDATE clientes 
+      SET verification_token = $1, verification_expires = $2 
+      WHERE id = $3
+    `, [token, expires, user.id]);
 
-    res.json({ sucesso: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email }});
+    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
+
+    const sendSmtpEmail = {
+      to: [{ email: email, name: user.nome }],
+      sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
+      subject: 'Reenvio: Confirme sua conta Queen Store 💜',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+          <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
+          <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${user.nome}</strong>!</p>
+          <h2 style="font-size: 32px; color: #8B00D7;">Reenvio de Confirmação</h2>
+          <p style="font-size: 20px; color: #0F1B3F;">Clique abaixo para confirmar sua conta:</p>
+          <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;margin:20px 0;">
+            Confirmar Conta Agora
+          </a>
+          <p style="font-size: 16px; color: #0F1B3F;">Se o botão não funcionar, copie: ${verifyLink}</p>
+          <p style="font-size: 16px; color: #0F1B3F;">Link expira em 24 horas.</p>
+          <p style="color: #8B00D7; font-size: 22px;">Com carinho,<br><strong>Queen Store</strong></p>
+        </div>
+      `
+    };
+
+    await apiInstance.sendTransacEmail(sendSmtpEmail);
+
+    res.json({ sucesso: true, mensagem: 'Email de confirmação reenviado!' });
   } catch (err) {
-    console.error('Erro no registro:', err);
-    res.status(500).json({ erro: 'Erro no servidor' });
+    console.error('Erro Brevo reenvio:', err);
+    res.status(500).json({ erro: 'Erro ao reenviar email' });
   }
 });
 
@@ -674,6 +656,195 @@ app.get('/api/cliente/pedidos', autenticar, async (req, res) => {
 // ROTA PRA PEGAR DADOS DO CLIENTE LOGADO
 app.get('/api/cliente/perfil', autenticar, async (req, res) => {
   res.json({ cliente: req.cliente });
+});
+
+// ATUALIZAR CADASTRO (NOME E EMAIL BLOQUEADOS)
+app.patch('/api/cliente/atualizar', autenticar, async (req, res) => {
+  const { whatsapp, endereco, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
+
+  if (senha && senha !== senha_confirm) {
+    return res.status(400).json({ erro: 'Senhas não coincidem' });
+  }
+
+  try {
+    let query = 'UPDATE clientes SET ';
+    const values = [];
+    let paramIndex = 1;
+
+    if (whatsapp !== undefined) {
+      query += `whatsapp = $${paramIndex}, `;
+      values.push(whatsapp);
+      paramIndex++;
+    }
+    if (endereco !== undefined) {
+      query += `endereco = $${paramIndex}, `;
+      values.push(endereco);
+      paramIndex++;
+    }
+    if (cidade !== undefined) {
+      query += `cidade = $${paramIndex}, `;
+      values.push(cidade);
+      paramIndex++;
+    }
+    if (estado !== undefined) {
+      query += `estado = $${paramIndex}, `;
+      values.push(estado);
+      paramIndex++;
+    }
+    if (cep !== undefined) {
+      query += `cep = $${paramIndex}, `;
+      values.push(cep);
+      paramIndex++;
+    }
+    if (complemento !== undefined) {
+      query += `complemento = $${paramIndex}, `;
+      values.push(complemento);
+      paramIndex++;
+    }
+    if (senha) {
+      const senhaHash = await bcrypt.hash(senha, 10);
+      query += `senha_hash = $${paramIndex}, `;
+      values.push(senhaHash);
+      paramIndex++;
+    }
+
+    // Remove vírgula extra
+    query = query.replace(/, $/, '');
+
+    query += ` WHERE id = $${paramIndex}`;
+    values.push(req.cliente.id);
+
+    await pool.query(query, values);
+
+    res.json({ sucesso: true, mensagem: 'Cadastro atualizado com sucesso!' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: 'Erro ao atualizar cadastro' });
+  }
+});
+
+// REGISTRO (adapta tua rota /api/auth/register)
+app.post('/api/auth/register', async (req, res) => {
+  const { nome, email, senha, whatsapp } = req.body;
+
+  // ... teu código de hash senha e insert ...
+
+  // Gera token único
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+
+  await pool.query(`
+    UPDATE clientes 
+    SET verification_token = $1, verification_expires = $2, is_verified = false 
+    WHERE email = $3
+  `, [token, expires, email]);
+
+  // Link de verificação
+  const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
+
+  // Email bonito
+  await transporter.sendMail({
+    from: '"Queen Store" <seuemail@gmail.com>',
+    to: email,
+    subject: 'Confirme sua conta Queen Store 💜',
+    html: `
+      <h1>Olá, ${nome}! Bem-vinda à Queen Store 👑</h1>
+      <p>Clique no botão abaixo para confirmar sua conta e começar a comprar:</p>
+      <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;">Confirmar Conta</a>
+      <p>Se o botão não funcionar, copie o link: ${verifyLink}</p>
+      <p>O link expira em 24 horas.</p>
+      <p>Com amor, Queen Store 💜</p>
+    `
+  });
+
+  res.json({ sucesso: true, mensagem: 'Cadastro realizado! Confira seu email para confirmar a conta.' });
+});
+
+// ROTA DE VERIFICAÇÃO
+app.get('/api/auth/verify/:token', async (req, res) => {
+  const { token } = req.params;
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM clientes 
+      WHERE verification_token = $1 AND verification_expires > NOW()
+    `, [token]);
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ erro: 'Token inválido ou expirado' });
+    }
+
+    await pool.query(`
+      UPDATE clientes 
+      SET is_verified = true, verification_token = NULL, verification_expires = NULL 
+      WHERE id = $1
+    `, [result.rows[0].id]);
+
+    res.json({ sucesso: true, mensagem: 'Conta verificada! Pode logar agora.' });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao verificar conta' });
+  }
+});
+
+// BLOQUEIA LOGIN SE NÃO VERIFICADO (adapta tua rota de login)
+app.post('/api/auth/login', async (req, res) => {
+  // ... teu código de login ...
+
+  if (!cliente.is_verified) {
+    return res.status(403).json({ erro: 'Confirme sua conta pelo email antes de logar' });
+  }
+
+  // ... gera token e responde ...
+});
+
+// REENVIAR EMAIL DE VERIFICAÇÃO
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const result = await pool.query('SELECT id, nome, is_verified FROM clientes WHERE email = $1', [email]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ erro: 'Email não encontrado' });
+    }
+
+    const user = result.rows[0];
+    if (user.is_verified) {
+      return res.status(400).json({ erro: 'Conta já verificada' });
+    }
+
+    // Gera novo token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await pool.query(`
+      UPDATE clientes 
+      SET verification_token = $1, verification_expires = $2 
+      WHERE id = $3
+    `, [token, expires, user.id]);
+
+    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
+
+    // Envia email novo
+    await transporter.sendMail({
+      from: '"Queen Store" <seuemail@gmail.com>',
+      to: email,
+      subject: 'Reenvio: Confirme sua conta Queen Store 💜',
+      html: `
+        <h1>Olá, ${user.nome}! 👑</h1>
+        <p>Você pediu para reenviar o email de confirmação.</p>
+        <p>Clique abaixo para ativar sua conta:</p>
+        <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;">Confirmar Conta Agora</a>
+        <p>Se o botão não funcionar: ${verifyLink}</p>
+        <p>O link expira em 24 horas.</p>
+        <p>Com amor, Queen Store 💜</p>
+      `
+    });
+
+    res.json({ sucesso: true, mensagem: 'Email de confirmação reenviado!' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: 'Erro ao reenviar email' });
+  }
 });
 
 // ==================== INICIA O SERVIDOR ====================
