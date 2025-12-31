@@ -795,6 +795,19 @@ app.get('/api/auth/verify/:token', async (req, res) => {
   }
 });
 
+app.get('/api/desejos', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.* FROM desejos d
+      JOIN produtos p ON d.produto_id = p.id
+      WHERE d.cliente_id = $1
+    `, [req.cliente.id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao listar desejos' });
+  }
+});
+
 // BLOQUEIA LOGIN SE NÃO VERIFICADO (adapta tua rota de login)
 app.post('/api/auth/login', async (req, res) => {
   // ... teu código de login ...
@@ -853,6 +866,24 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ erro: 'Erro ao reenviar email' });
+  }
+});
+
+// SALVAR/ATUALIZAR ENDEREÇO DO CLIENTE
+app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
+  const { whatsapp, endereco, cidade, estado, cep, complemento } = req.body;
+
+  try {
+    await pool.query(`
+      UPDATE clientes 
+      SET whatsapp = $1, endereco = $2, cidade = $3, estado = $4, cep = $5, complemento = $6
+      WHERE id = $7
+    `, [whatsapp, endereco, cidade, estado, cep, complemento, req.cliente.id]);
+
+    res.json({ sucesso: true, mensagem: 'Endereço atualizado!' });
+  } catch (err) {
+    console.error('Erro ao salvar endereço:', err);
+    res.status(500).json({ erro: 'Erro ao salvar endereço' });
   }
 });
 
