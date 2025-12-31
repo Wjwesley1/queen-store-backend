@@ -8,6 +8,7 @@ const brevo = require('@getbrevo/brevo');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
+const CORS = require('cors');
 
 const app = express();
 const apiInstance = new brevo.TransactionalEmailsApi();
