@@ -869,20 +869,34 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-// SALVAR/ATUALIZAR ENDEREÇO DO CLIENTE
+// SALVAR/ATUALIZAR ENDEREÇO DO CLIENTE LOGADO
 app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
   const { whatsapp, endereco, cidade, estado, cep, complemento } = req.body;
 
   try {
     await pool.query(`
       UPDATE clientes 
-      SET whatsapp = $1, endereco = $2, cidade = $3, estado = $4, cep = $5, complemento = $6
+      SET 
+        whatsapp = COALESCE($1, whatsapp),
+        endereco = COALESCE($2, endereco),
+        cidade = COALESCE($3, cidade),
+        estado = COALESCE($4, estado),
+        cep = COALESCE($5, cep),
+        complemento = COALESCE($6, complemento)
       WHERE id = $7
-    `, [whatsapp, endereco, cidade, estado, cep, complemento, req.cliente.id]);
+    `, [
+      whatsapp || null,
+      endereco || null,
+      cidade || null,
+      estado || null,
+      cep || null,
+      complemento || null,
+      req.cliente.id
+    ]);
 
-    res.json({ sucesso: true, mensagem: 'Endereço atualizado!' });
+    res.json({ sucesso: true, mensagem: 'Endereço atualizado com sucesso!' });
   } catch (err) {
-    console.error('Erro ao salvar endereço:', err);
+    console.error('Erro ao atualizar endereço:', err);
     res.status(500).json({ erro: 'Erro ao salvar endereço' });
   }
 });
