@@ -648,7 +648,7 @@ const autenticar = async (req, res, next) => {
 };
 
 // EXEMPLO DE ROTA PROTEGIDA — HISTÓRICO DE PEDIDOS DO CLIENTE
-app.get('/api/cliente/pedidos', autenticar, async (req, res) => {
+app.get('/api/clientes/pedidos', autenticar, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT * FROM pedidos 
@@ -663,12 +663,12 @@ app.get('/api/cliente/pedidos', autenticar, async (req, res) => {
 });
 
 // ROTA PRA PEGAR DADOS DO CLIENTE LOGADO
-app.get('/api/cliente/perfil', autenticar, async (req, res) => {
+app.get('/api/clientes/perfil', autenticar, async (req, res) => {
   res.json({ cliente: req.cliente });
 });
 
 // ATUALIZAR CADASTRO (NOME E EMAIL BLOQUEADOS)
-app.patch('/api/cliente/atualizar', autenticar, async (req, res) => {
+app.patch('/api/clientes/atualizar', autenticar, async (req, res) => {
   const { whatsapp, endereco, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
 
   if (senha && senha !== senha_confirm) {
@@ -870,81 +870,50 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 });
 
 // ==================== MÚLTIPLOS ENDEREÇOS ====================
-// Listar todos os endereços do cliente
-app.get('/api/cliente/enderecos', autenticar, async (req, res) => {
+// GET — CARREGA ENDEREÇO DO CLIENTE (singular)
+app.get('/api/cliente/endereco', autenticar, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM enderecos 
-      WHERE cliente_id = $1 
-      ORDER BY principal DESC, criado_em DESC
+      SELECT whatsapp, endereco, cidade, estado, cep, complemento 
+      FROM clientes 
+      WHERE id = $1
     `, [req.cliente.id]);
-    res.json(result.rows || []);
+    res.json(result.rows[0] || {});
   } catch (err) {
-    console.error('Erro ao listar endereços:', err);
-    res.status(500).json({ erro: 'Erro ao listar endereços' });
+    console.error('Erro ao carregar endereço:', err);
+    res.status(500).json({ erro: 'Erro ao carregar endereço' });
   }
 });
 
-// Adicionar novo endereço
-app.post('/api/cliente/enderecos', autenticar, async (req, res) => {
-  const { apelido, whatsapp, endereco, cidade, estado, cep, complemento, principal = false } = req.body;
+// PATCH — SALVA/ATUALIZA ENDEREÇO DO CLIENTE (singular)
+app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
+  const { whatsapp, endereco, cidade, estado, cep, complemento } = req.body;
 
   try {
-    if (principal) {
-      await pool.query('UPDATE enderecos SET principal = FALSE WHERE cliente_id = $1', [req.cliente.id]);
-    }
+    await pool.query(`
+      UPDATE clientes 
+      SET 
+        whatsapp = COALESCE($1, whatsapp),
+        endereco = COALESCE($2, endereco),
+        cidade = COALESCE($3, cidade),
+        estado = COALESCE($4, estado),
+        cep = COALESCE($5, cep),
+        complemento = COALESCE($6, complemento)
+      WHERE id = $7
+    `, [
+      whatsapp || null,
+      endereco || null,
+      cidade || null,
+      estado || null,
+      cep || null,
+      complemento || null,
+      req.cliente.id
+    ]);
 
-    const result = await pool.query(`
-      INSERT INTO enderecos (cliente_id, apelido, whatsapp, endereco, cidade, estado, cep, complemento, principal)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *
-    `, [req.cliente.id, apelido, whatsapp, endereco, cidade, estado, cep, complemento, principal]);
-
-    res.json({ sucesso: true, endereco: result.rows[0] });
-  } catch (err) {
-    console.error('Erro ao adicionar endereço:', err);
-    res.status(500).json({ erro: 'Erro ao adicionar endereço' });
-  }
-});
-
-// Atualizar endereço
-app.patch('/api/cliente/enderecos/:id', autenticar, async (req, res) => {
-  const { id } = req.params;
-  const { apelido, whatsapp, endereco, cidade, estado, cep, complemento, principal } = req.body;
-
-  try {
-    if (principal) {
-      await pool.query('UPDATE enderecos SET principal = FALSE WHERE cliente_id = $1', [req.cliente.id]);
-    }
-
-    const result = await pool.query(`
-      UPDATE enderecos 
-      SET apelido = $1, whatsapp = $2, endereco = $3, cidade = $4, estado = $5, cep = $6, complemento = $7, principal = $8, atualizado_em = NOW()
-      WHERE id = $9 AND cliente_id = $10
-      RETURNING *
-    `, [apelido, whatsapp, endereco, cidade, estado, cep, complemento, principal, id, req.cliente.id]);
-
-    if (result.rowCount === 0) return res.status(404).json({ erro: 'Endereço não encontrado' });
-
-    res.json({ sucesso: true, endereco: result.rows[0] });
+    res.json({ sucesso: true, mensagem: 'Endereço atualizado!' });
   } catch (err) {
     console.error('Erro ao atualizar endereço:', err);
-    res.status(500).json({ erro: 'Erro ao atualizar endereço' });
-  }
-});
-
-// Excluir endereço
-app.delete('/api/cliente/enderecos/:id', autenticar, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const result = await pool.query('DELETE FROM enderecos WHERE id = $1 AND cliente_id = $2', [id, req.cliente.id]);
-    if (result.rowCount === 0) return res.status(404).json({ erro: 'Endereço não encontrado' });
-
-    res.json({ sucesso: true, mensagem: 'Endereço excluído' });
-  } catch (err) {
-    console.error('Erro ao excluir endereço:', err);
-    res.status(500).json({ erro: 'Erro ao excluir endereço' });
+    res.status(500).json({ erro: 'Erro ao salvar endereço' });
   }
 });
 
