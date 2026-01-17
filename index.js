@@ -921,7 +921,7 @@ app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
 app.get('/api/cliente/dados', autenticar, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT nome, email, whatsapp, endereco, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
+      'SELECT nome, email, whatsapp, enderecos, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
       [req.cliente.id]
     );
 
