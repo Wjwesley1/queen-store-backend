@@ -433,7 +433,7 @@ app.post('/api/pedidos', async (req, res) => {
     const result = await pool.query(`
       INSERT INTO pedidos (
         cliente_nome, cliente_whatsapp, cliente_email, itens, valor_total, status,
-        endereco, cidade, estado, cep, forma_pagamento
+        enderecos, cidade, estado, cep, forma_pagamento
       ) VALUES (
         $1, $2, $3, $4, $5, 'pendente',
         'Endereço via WhatsApp', 'Cidade via WhatsApp', 'NA', '00000-000', 'PIX'
