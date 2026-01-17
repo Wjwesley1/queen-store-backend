@@ -917,6 +917,25 @@ app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
   }
 });
 
+// GET - Dados do cliente logado (endereço, whatsapp, etc)
+app.get('/api/cliente/dados', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT nome, email, whatsapp, endereco, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
+      [req.cliente.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ erro: 'Dados não encontrados' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Erro ao buscar dados do cliente:', err);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+});
+
 // ==================== INICIA O SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
 
