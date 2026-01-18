@@ -413,7 +413,7 @@ app.patch('/api/pedidos/:id', async (req, res) => {
   }
 });
 
-// SALVAR PEDIDO COM EMAIL DO CLIENTE — VERSÃO QUE SALVA TUDO
+// SALVAR PEDIDO COM EMAIL DE CONFIRMAÇÃO
 app.post('/api/pedidos', async (req, res) => {
   console.log('PEDIDO RECEBIDO:', req.body);
 
@@ -430,19 +430,52 @@ app.post('/api/pedidos', async (req, res) => {
   }
 
   try {
+    // 1. SALVA O PEDIDO NO BANCO
     const result = await pool.query(`
       INSERT INTO pedidos (
         cliente_nome, cliente_whatsapp, cliente_email, itens, valor_total, status,
-        enderecos, cidade, estado, cep, forma_pagamento
+        criado_em
       ) VALUES (
-        $1, $2, $3, $4, $5, 'pendente',
-        'Endereço via WhatsApp', 'Cidade via WhatsApp', 'NA', '00000-000', 'PIX'
+        $1, $2, $3, $4, $5, 'pendente', NOW()
       )
       RETURNING id
     `, [cliente_nome, cliente_whatsapp, cliente_email, JSON.stringify(itens), valor_total]);
 
-    console.log('PEDIDO SALVO COM ID:', result.rows[0].id, 'EMAIL:', cliente_email);
-    res.json({ sucesso: true, pedido_id: result.rows[0].id });
+    const pedidoId = result.rows[0].id;
+
+    // 2. ENVIA EMAIL DE CONFIRMAÇÃO (se email informado)
+    if (cliente_email !== 'Não informado' && cliente_email.includes('@')) {
+      const sendSmtpEmail = {
+        to: [{ email: cliente_email, name: cliente_nome }],
+        sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
+        subject: `Confirmação de Pedido #${pedidoId} - Queen Store 💜`,
+        htmlContent: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+            <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
+            <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${cliente_nome}</strong>!</p>
+            <h2 style="font-size: 32px; color: #8B00D7;">Seu pedido foi recebido!</h2>
+            <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedidoId}</p>
+            <p style="font-size: 18px; color: #0F1B3F; margin-top: 20px;">
+              Itens: <br>${itens.map(i => `${i.nome} × ${i.quantidade} - R$ ${(i.preco * i.quantidade).toFixed(2)}`).join('<br>')}
+            </p>
+            <p style="font-size: 24px; color: #0F1B3F; font-weight: bold; margin-top: 20px;">
+              Total: R$ ${valor_total.toFixed(2)}
+            </p>
+            <p style="font-size: 18px; color: #0F1B3F; margin-top: 40px;">
+              Em breve te avisamos o status! Qualquer dúvida, responde esse email ou chama no WhatsApp: (31) 97255-2077
+            </p>
+            <p style="color: #8B00D7; font-size: 22px; margin-top: 40px;">Com carinho,<br><strong>Queen Store</strong></p>
+          </div>
+        `
+      };
+
+      await apiInstance.sendTransacEmail(sendSmtpEmail);
+      console.log(`EMAIL DE CONFIRMAÇÃO ENVIADO → ${cliente_email} | Pedido #${pedidoId}`);
+    } else {
+      console.log('Email não informado, pulando envio');
+    }
+
+    res.json({ sucesso: true, pedido_id: pedidoId });
 
   } catch (err) {
     console.error('ERRO SALVANDO PEDIDO:', err);
