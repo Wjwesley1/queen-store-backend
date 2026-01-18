@@ -702,7 +702,7 @@ app.get('/api/clientes/perfil', autenticar, async (req, res) => {
 
 // ATUALIZAR CADASTRO (NOME E EMAIL BLOQUEADOS)
 app.patch('/api/clientes/atualizar', autenticar, async (req, res) => {
-  const { whatsapp, endereco, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
+  const { whatsapp, enderecos, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
 
   if (senha && senha !== senha_confirm) {
     return res.status(400).json({ erro: 'Senhas não coincidem' });
@@ -718,9 +718,9 @@ app.patch('/api/clientes/atualizar', autenticar, async (req, res) => {
       values.push(whatsapp);
       paramIndex++;
     }
-    if (endereco !== undefined) {
-      query += `endereco = $${paramIndex}, `;
-      values.push(endereco);
+    if (enderecos !== undefined) {
+      query += `enderecos = $${paramIndex}, `;
+      values.push(enderecos);
       paramIndex++;
     }
     if (cidade !== undefined) {
@@ -903,31 +903,31 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 });
 
 // ==================== MÚLTIPLOS ENDEREÇOS ====================
-// GET — CARREGA ENDEREÇO DO CLIENTE (singular)
-app.get('/api/cliente/endereco', autenticar, async (req, res) => {
+// GET — CARREGA ENDEREÇOS DO CLIENTE (plural)
+app.get('/api/cliente/enderecos', autenticar, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT whatsapp, endereco, cidade, estado, cep, complemento 
+      SELECT whatsapp, enderecos, cidade, estado, cep, complemento 
       FROM clientes 
       WHERE id = $1
     `, [req.cliente.id]);
     res.json(result.rows[0] || {});
   } catch (err) {
-    console.error('Erro ao carregar endereço:', err);
-    res.status(500).json({ erro: 'Erro ao carregar endereço' });
+    console.error('Erro ao carregar endereços:', err);
+    res.status(500).json({ erro: 'Erro ao carregar endereços' });
   }
 });
 
-// PATCH — SALVA/ATUALIZA ENDEREÇO DO CLIENTE (singular)
-app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
-  const { whatsapp, endereco, cidade, estado, cep, complemento } = req.body;
+// PATCH — SALVA/ATUALIZA ENDEREÇOS DO CLIENTE (plural)
+app.patch('/api/cliente/enderecos', autenticar, async (req, res) => {
+  const { whatsapp, enderecos, cidade, estado, cep, complemento } = req.body;
 
   try {
     await pool.query(`
       UPDATE clientes 
       SET 
         whatsapp = COALESCE($1, whatsapp),
-        endereco = COALESCE($2, endereco),
+        enderecos = COALESCE($2, enderecos),
         cidade = COALESCE($3, cidade),
         estado = COALESCE($4, estado),
         cep = COALESCE($5, cep),
@@ -935,7 +935,7 @@ app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
       WHERE id = $7
     `, [
       whatsapp || null,
-      endereco || null,
+      enderecos || null,
       cidade || null,
       estado || null,
       cep || null,
@@ -943,14 +943,14 @@ app.patch('/api/cliente/endereco', autenticar, async (req, res) => {
       req.cliente.id
     ]);
 
-    res.json({ sucesso: true, mensagem: 'Endereço atualizado!' });
+    res.json({ sucesso: true, mensagem: 'Endereços atualizados!' });
   } catch (err) {
-    console.error('Erro ao atualizar endereço:', err);
-    res.status(500).json({ erro: 'Erro ao salvar endereço' });
+    console.error('Erro ao atualizar endereços:', err);
+    res.status(500).json({ erro: 'Erro ao salvar endereços' });
   }
 });
 
-// GET - Dados do cliente logado (endereço, whatsapp, etc)
+// GET - Dados do cliente logado (endereços, whatsapp, etc)
 app.get('/api/cliente/dados', autenticar, async (req, res) => {
   try {
     const result = await pool.query(
