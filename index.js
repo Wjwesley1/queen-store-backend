@@ -10,7 +10,8 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
-const apiInstance = new brevo.TransactionalEmailsApi();
+const apiInstance = new Brevo.TransactionalEmailsApi();
+apiInstance.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
 const cors = require('cors');
