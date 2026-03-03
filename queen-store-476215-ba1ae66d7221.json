@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "queen-store-476215",
+  "private_key_id": "ba1ae66d72219796e1ae7912c5ca330f32c0a02b",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDcj/VGnKJ6lk57\nUQFvWp05ClXKztrrMbM8MaezXBsrPqNDe19PJg+BjKKL24EHE144XBsX0EPxOSdE\nvzHdu8sbU63HQI7gKQdQn7ZO9gfmNGa3KxudttrjVVQ8ZekLt0gNM4ddLLI75KnA\nZWnuhoIIUPdy3YBZAvBBo3jsr0z+hLy0B2RJrzkVz7fmpCw/YD4MAGnbc7DXSOBB\n/TBL85d98uaxX3FvyzCRGCdoXjl9ewjeNBNSB2aZfoOZUxwMuD52tP/3dIIB0ktF\n5rSfZdCwtEGtL4uj6zyBgeIBRGVEHepQ8Dfe4DjpzjzpQPKTmrQQAHaOtqEfYOaJ\nzz8U5YPTAgMBAAECggEAZWLhRx+qSnp8QhBW/gZjvjwjerICjNmQP+u9YGPG82Z8\nKwFzqtDekNkCQRLaKVP8XCDurVAlYyW4CNBwjjIMZ5fcCnsBEkaZ37RC2+IZeHb+\n/lTZAXL0BEsNiSP5b9LE0pissSZiGcj/RPr5KlV3QXZigNET9ha1NR79b6MXW+jy\nasG/wKK9PNNUxOZKhJgW04LDURIeNZQ2PyFml8vljmqTd/QCPqljFDFOnyL4hxNT\nOJhr8oJvmxgJJJaoz/uT/vya7y3FMx5yFOKKD/XoDbYgCChJ3Oe4P27RrUt7fdE4\n3C1DUDDc2ui0kggDmzOjWpvVZDUj62P15EQhZ/r+FQKBgQD8x2Rrd+RSJTM5Qnuu\nkhoes4mMJG+s9CWNHcgUqzDht763zR6o9jrZvhNLew4ZkF9U2QpnZSlpHqO/oULI\nMGHiRNLbq8zmu45P7anslCklhIp2Nl6IjIEInEgzU5skIasLymRTN/wjgjqSpxVn\n54XUzghubHOHBOlxTqRvJJ3iBwKBgQDfX3hSTVm2c3N7y/lZpJncO8Q8UWH7Nq4t\nATVEeaMKQazu9Du71lMTmywptSvtUCFBBTQ8+6d/RCyiqS9Nh1SoERgDn5XpMzmb\nyvPF7Y3zJ/9xqmdeES1BW93XcyPKQJR9PVMCU5pIwjazEZQ7tGctSm5a3AK67HcD\nfq6T0wbs1QKBgQCG/B9W+FYXu7/H4wXTKjgCjxNzn/122YW3/uBakTRwRMP2uPWX\neq3gmw0IsLTN1/fggmp43l+nv/HnokDcUGHlB6WmIu8vg5ayfhLQwCnc3BNonw4K\nUyWQqIwxxILDX6tMh47dlbbya1fF+q2Gp+8ivcdo2Ec1Id1bYYiTxXT+PwKBgCyb\nxEurZt8o70cp1QIx/QgeZ3IkToz8vov+UcT7BbRmqUKPQ96fTrf7pTYvGDasafey\nMlx7ZVflJYTWhLvW6vEleMZAeI+5yydxwH0mk9KbikgI39vJUmBbGFKOi/c4Lm9U\nb99nEsi1AHeCazgBLxm8Y42Boonx71KjWfnritaBAoGBAL0I9SbVeUm93W1HRJC4\nbY3LTahFLCIqtHWgbakySjKR4CnXN1moRYOTtVX/zxfGGvVyi46Gdfvlw0c6VZrA\nRgSO0JVAGyFiauuB70vKpafq5ClawsPTBl1BJZ2NAKhyLQy3Jdf9VqyNQXp0e6Fm\ngWW/aprVB34RxE5NZk/ZZ84O\n-----END PRIVATE KEY-----\n",
+  "client_email": "srvc-queen-store@queen-store-476215.iam.gserviceaccount.com",
+  "client_id": "113963182008349564535",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/srvc-queen-store%40queen-store-476215.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

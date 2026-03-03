@@ -8,13 +8,19 @@ const brevo = require('@getbrevo/brevo');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
+const { google } = require('googleapis');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+
 
 const app = express();
-const apiInstance = new Brevo.TransactionalEmailsApi();
-apiInstance.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+const apiInstance = new brevo.TransactionalEmailsApi();
+apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
 const cors = require('cors');
+const upload = multer({ dest: 'uploads/' }); // Pasta temporária para uploads
 
 // ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
 app.use(cors({
@@ -57,6 +63,76 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// ==================== CREDENCIAIS PARA UPLOAD ====================
+
+// Auth Google Drive (Service Account) - carregue uma vez fora da rota
+const auth = new google.auth.GoogleAuth({
+  keyFile: './queen-store-476215-ba1ae66d7221.json', // caminho do JSON baixado
+  scopes: ['https://www.googleapis.com/auth/drive']
+});
+const drive = google.drive({ version: 'v3', auth });
+
+const PASTA_ID = '1PI8EKJ_Oz8crkQmkHTPezBoJ6jjK0LhN'; // ID da pasta no Drive
+
+// Função auxiliar para upload de um arquivo
+async function uploadToDrive(filePath, originalName, mimeType) {
+  const fileMetadata = {
+    name: originalName,
+    parents: [PASTA_ID]
+  };
+  const media = {
+    mimeType,
+    body: fs.createReadStream(filePath)
+  };
+
+  const { data } = await drive.files.create({
+    resource: fileMetadata,
+    media,
+    fields: 'id, name, webViewLink, webContentLink'
+  });
+
+  // Torna público (opcional, se quiser link direto)
+  await drive.permissions.create({
+    fileId: data.id,
+    requestBody: { role: 'reader', type: 'anyone' }
+  });
+
+  // Deleta temp
+  fs.unlinkSync(filePath);
+
+  return data.webViewLink; // ou webContentLink se quiser download direto
+}
+
+// Rota POST /api/produtos
+app.post('/api/produtos', upload.array('imagens', 4), async (req, res) => {
+  try {
+    const { nome, preco, estoque, categoria, descricao, ingredientes, frase_promocional, badge, video_url } = req.body;
+
+    // Upload das imagens para Drive
+    const imagensLinks = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const link = await uploadToDrive(file.path, file.originalname, file.mimetype);
+        imagensLinks.push(link);
+      }
+    }
+
+    // Aqui salva no seu banco (MongoDB, etc.)
+    // Ex: const novoProduto = await Produto.create({ nome, preco: parseFloat(preco), ..., imagens: imagensLinks, ... });
+
+    res.status(201).json({
+      success: true,
+      message: 'Produto criado!',
+      imagens: imagensLinks // retorna os links para debug ou uso
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
 
 // ==================== ROTA RAIZ ====================
 app.get('/', (req, res) => {
