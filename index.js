@@ -68,7 +68,7 @@ const pool = new Pool({
 
 // Auth Google Drive (Service Account) - carregue uma vez fora da rota
 const auth = new google.auth.GoogleAuth({
-  keyFile: './queen-store-476215-ba1ae66d7221.json', // caminho do JSON baixado
+  keyFile: './secrets/queen-store-476215-ba1ae66d7221.json', // caminho do JSON baixado
   scopes: ['https://www.googleapis.com/auth/drive']
 });
 const drive = google.drive({ version: 'v3', auth });
