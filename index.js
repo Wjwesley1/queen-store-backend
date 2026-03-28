@@ -17,7 +17,7 @@ const path = require('path');
 const app = express();
 const apiInstance = new brevo.TransactionalEmailsApi();
 apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
-const JWT_SECRET = process.env.JWT_SECRET || 'queen-store-secret-super-seguro-2025';
+const JWT_SECRET = process.env.JWT_SECRET;
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
 const cors = require('cors');
 const upload = multer({ dest: 'uploads/' }); // Pasta temporária para uploads
@@ -68,12 +68,12 @@ const pool = new Pool({
 
 // Auth Google Drive (Service Account) - carregue uma vez fora da rota
 const auth = new google.auth.GoogleAuth({
-  keyFile: './secrets/queen-store-476215-ba1ae66d7221.json', // caminho do JSON baixado
+  keyFile: process.env.KEY_FILE_PATH, // caminho do JSON baixado
   scopes: ['https://www.googleapis.com/auth/drive']
 });
 const drive = google.drive({ version: 'v3', auth });
 
-const PASTA_ID = '1PI8EKJ_Oz8crkQmkHTPezBoJ6jjK0LhN'; // ID da pasta no Drive
+const PASTA_ID = process.env.PAST_ID ; 
 
 // Função auxiliar para upload de um arquivo
 async function uploadToDrive(filePath, originalName, mimeType) {
