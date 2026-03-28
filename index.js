@@ -400,6 +400,17 @@ app.patch('/api/produtos/:id/estoque', async (req, res) => {
   }
 });
 
+app.delete('/api/produtos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM produtos WHERE id = $1', [id]);
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro ao deletar produto:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
 // ==================== ADMIN — DASHBOARD ====================
 // 1. Pedidos pendentes
 app.get('/api/admin/pedidos-pendentes', async (req, res) => {
