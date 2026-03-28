@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto'); // ← CORRIGIDO: estava faltando
 const { OAuth2Client } = require('google-auth-library');
-const { google } = require('googleapis');
+const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const fs = require('fs');
 const cors = require('cors');
@@ -57,34 +57,23 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ==================== GOOGLE DRIVE ====================
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS), // ← variável de ambiente, não arquivo
-  scopes: ['https://www.googleapis.com/auth/drive']
+// ==================== CLOUDINARY ====================
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
-const drive = google.drive({ version: 'v3', auth });
-const PASTA_ID = process.env.PASTA_ID;
 
-async function uploadToDrive(filePath, originalName, mimeType) {
-  const fileMetadata = { name: originalName, parents: [PASTA_ID] };
-  const media = { mimeType, body: fs.createReadStream(filePath) };
-
-  const { data } = await drive.files.create({
-    resource: fileMetadata,
-    media,
-    fields: 'id, webViewLink'
-  });
-
-  // Torna o arquivo público para exibir no frontend
-  await drive.permissions.create({
-    fileId: data.id,
-    requestBody: { role: 'reader', type: 'anyone' }
+async function uploadToCloudinary(filePath, originalName) {
+  const result = await cloudinary.uploader.upload(filePath, {
+    folder: 'queen-store/produtos',
+    public_id: `${Date.now()}-${originalName.replace(/\.[^/.]+$/, '')}`,
+    resource_type: 'image'
   });
 
   fs.unlinkSync(filePath); // remove arquivo temporário
 
-  // Retorna link direto para imagem (melhor para <img src="">)
-  return `https://drive.google.com/uc?export=view&id=${data.id}`;
+  return result.secure_url; // link HTTPS direto, perfeito para <img src="">
 }
 
 // ==================== HELPER: ENVIAR EMAIL ====================
@@ -220,7 +209,7 @@ app.post('/api/produtos', upload.array('imagens', 4), async (req, res) => {
     const imagensLinks = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
-        const link = await uploadToDrive(file.path, file.originalname, file.mimetype);
+        const link = await uploadToCloudinary(file.path, file.originalname);
         imagensLinks.push(link);
       }
     }
