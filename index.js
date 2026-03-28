@@ -228,7 +228,7 @@ app.post('/api/produtos', upload.array('imagens', 4), async (req, res) => {
       descricao?.trim() || null,
       ingredientes?.trim() || null,
       frase_promocional?.trim() || null,
-      imagensLinks,
+      JSON.stringify(imagensLinks),
       badge?.trim() || null,
       video_url?.trim() || null
     ]);
