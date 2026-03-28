@@ -1,5 +1,5 @@
-// src/index.js — QUEEN STORE BACKEND IMORTAL (Render + Neon + Vercel)
-// Última versão 100% funcional — DELETE funcionando, estoque real, CORS perfeito
+// src/index.js — QUEEN STORE BACKEND IMORTAL
+// Versão corrigida: Drive OK, sem rotas duplicadas, crypto importado, brevo unificado
 
 require('dotenv').config();
 const express = require('express');
@@ -7,34 +7,35 @@ const { Pool } = require('pg');
 const brevo = require('@getbrevo/brevo');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto'); // ← CORRIGIDO: estava faltando
 const { OAuth2Client } = require('google-auth-library');
 const { google } = require('googleapis');
 const multer = require('multer');
 const fs = require('fs');
-const path = require('path');
-
+const cors = require('cors');
 
 const app = express();
+
+// ==================== BREVO (email) ====================
 const apiInstance = new brevo.TransactionalEmailsApi();
 apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
-const JWT_SECRET = process.env.JWT_SECRET;
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID); 
-const cors = require('cors');
-const upload = multer({ dest: 'uploads/' }); // Pasta temporária para uploads
 
-// ==================== CORS DEFINITIVO — FUNCIONA EM QUALQUER DOMÍNIO, COM x-session-id E TUDO ====================
+// ==================== CONSTANTES ====================
+const JWT_SECRET = process.env.JWT_SECRET;
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const upload = multer({ dest: 'uploads/' });
+
+// ==================== CORS ====================
 app.use(cors({
   origin: function (origin, callback) {
-    // Permite localhost (dev) e teu domínio de produção
     const allowed = [
       'http://localhost:3000',
-      'http://localhost:5173', // Vite padrão
-      'https://queen-store-frontend.vercel.app', // produção
+      'http://localhost:5173',
+      'https://queen-store-frontend.vercel.app',
       'https://queen-store-frontend.onrender.com',
       'https://www.queenstore.store',
-      'https://queenstore.store' // se tiver deploy no Render
+      'https://queenstore.store'
     ];
-
     if (!origin || allowed.includes(origin)) {
       callback(null, true);
     } else {
@@ -42,109 +43,146 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'x-session-id',
-    'X-Session-Id',
-    'Origin',
-    'Accept'
-  ],
-  credentials: true,           // importante se usar cookies/sessão
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id', 'X-Session-Id', 'Origin', 'Accept'],
+  credentials: true,
   preflightContinue: false,
-  optionsSuccessStatus: 204    // Responde 204 para OPTIONS (muitos browsers precisam)
+  optionsSuccessStatus: 204
 }));
 
-// Coloca isso DEPOIS do CORS, ANTES das rotas
 app.use(express.json());
 
-// ==================== CONEXÃO COM NEON.TECH (PostgreSQL) ====================
+// ==================== BANCO (Neon PostgreSQL) ====================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// ==================== CREDENCIAIS PARA UPLOAD ====================
-
-// Auth Google Drive (Service Account) - carregue uma vez fora da rota
+// ==================== GOOGLE DRIVE ====================
 const auth = new google.auth.GoogleAuth({
-  keyFile: process.env.KEY_FILE_PATH, // caminho do JSON baixado
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS), // ← variável de ambiente, não arquivo
   scopes: ['https://www.googleapis.com/auth/drive']
 });
 const drive = google.drive({ version: 'v3', auth });
+const PASTA_ID = process.env.PASTA_ID;
 
-const PASTA_ID = process.env.PAST_ID ; 
-
-// Função auxiliar para upload de um arquivo
 async function uploadToDrive(filePath, originalName, mimeType) {
-  const fileMetadata = {
-    name: originalName,
-    parents: [PASTA_ID]
-  };
-  const media = {
-    mimeType,
-    body: fs.createReadStream(filePath)
-  };
+  const fileMetadata = { name: originalName, parents: [PASTA_ID] };
+  const media = { mimeType, body: fs.createReadStream(filePath) };
 
   const { data } = await drive.files.create({
     resource: fileMetadata,
     media,
-    fields: 'id, name, webViewLink, webContentLink'
+    fields: 'id, webViewLink'
   });
 
-  // Torna público (opcional, se quiser link direto)
+  // Torna o arquivo público para exibir no frontend
   await drive.permissions.create({
     fileId: data.id,
     requestBody: { role: 'reader', type: 'anyone' }
   });
 
-  // Deleta temp
-  fs.unlinkSync(filePath);
+  fs.unlinkSync(filePath); // remove arquivo temporário
 
-  return data.webViewLink; // ou webContentLink se quiser download direto
+  // Retorna link direto para imagem (melhor para <img src="">)
+  return `https://drive.google.com/uc?export=view&id=${data.id}`;
 }
 
-// Rota POST /api/produtos
-app.post('/api/produtos', upload.array('imagens', 4), async (req, res) => {
+// ==================== HELPER: ENVIAR EMAIL ====================
+async function enviarEmail(para, nome, assunto, htmlContent) {
+  const sendSmtpEmail = {
+    to: [{ email: para, name: nome }],
+    sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
+    subject: assunto,
+    htmlContent
+  };
+  await apiInstance.sendTransacEmail(sendSmtpEmail);
+}
+
+function emailConfirmacaoPedido(nome, pedidoId, itens, valorTotal) {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+      <h1 style="color: #0F1B3F;">Queen Store</h1>
+      <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${nome}</strong>!</p>
+      <h2 style="color: #8B00D7;">Seu pedido foi recebido!</h2>
+      <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedidoId}</p>
+      <p style="font-size: 18px; color: #0F1B3F;">
+        ${itens.map(i => `${i.nome} × ${i.quantidade} — R$ ${(i.preco * i.quantidade).toFixed(2)}`).join('<br>')}
+      </p>
+      <p style="font-size: 24px; color: #0F1B3F; font-weight: bold;">Total: R$ ${valorTotal.toFixed(2)}</p>
+      <p style="font-size: 16px; color: #0F1B3F; margin-top: 30px;">Dúvidas? WhatsApp: (31) 97255-2077</p>
+      <p style="color: #8B00D7; font-size: 20px;">Com carinho,<br><strong>Queen Store</strong></p>
+    </div>
+  `;
+}
+
+function emailVerificacaoConta(nome, verifyLink) {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+      <h1 style="color: #0F1B3F;">Queen Store</h1>
+      <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${nome}</strong>! Bem-vinda 👑</p>
+      <h2 style="color: #8B00D7;">Confirme sua conta</h2>
+      <p style="font-size: 18px; color: #0F1B3F;">Clique abaixo para ativar sua conta:</p>
+      <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;margin:20px 0;">
+        Confirmar Conta Agora
+      </a>
+      <p style="font-size: 14px; color: #666;">Se o botão não funcionar, acesse: ${verifyLink}</p>
+      <p style="font-size: 14px; color: #666;">Link expira em 24 horas.</p>
+      <p style="color: #8B00D7; font-size: 20px;">Com carinho,<br><strong>Queen Store</strong></p>
+    </div>
+  `;
+}
+
+function emailStatusPedido(nome, pedidoId, status) {
+  const mensagens = {
+    pago: 'Seu pagamento foi confirmado! 🎉',
+    enviado: 'Seu pedido foi enviado! 🚚',
+    entregue: 'Seu pedido foi entregue! 💜',
+    concluido: 'Pedido concluído! Obrigada pela preferência 👑'
+  };
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
+      <h1 style="color: #0F1B3F;">Queen Store</h1>
+      <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${nome}</strong>!</p>
+      <h2 style="color: #8B00D7;">${mensagens[status] || 'Status atualizado!'}</h2>
+      <p style="font-size: 24px; color: #0F1B3F; font-weight: bold;">Pedido #${pedidoId}</p>
+      <p style="font-size: 16px; color: #0F1B3F;">Dúvidas? WhatsApp: (31) 97255-2077</p>
+      <p style="color: #8B00D7; font-size: 20px;">Com carinho,<br><strong>Queen Store</strong></p>
+    </div>
+  `;
+}
+
+// ==================== MIDDLEWARE AUTH ====================
+const autenticar = async (req, res, next) => {
+  const token = req.headers.authorization?.split('Bearer ')[1];
+  if (!token) return res.status(401).json({ erro: 'Token não fornecido' });
+
   try {
-    const { nome, preco, estoque, categoria, descricao, ingredientes, frase_promocional, badge, video_url } = req.body;
-
-    // Upload das imagens para Drive
-    const imagensLinks = [];
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        const link = await uploadToDrive(file.path, file.originalname, file.mimetype);
-        imagensLinks.push(link);
-      }
-    }
-
-    // Aqui salva no seu banco (MongoDB, etc.)
-    // Ex: const novoProduto = await Produto.create({ nome, preco: parseFloat(preco), ..., imagens: imagensLinks, ... });
-
-    res.status(201).json({
-      success: true,
-      message: 'Produto criado!',
-      imagens: imagensLinks // retorna os links para debug ou uso
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: error.message });
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const result = await pool.query('SELECT id, nome, email FROM clientes WHERE id = $1', [decoded.clienteId]);
+    if (result.rows.length === 0) return res.status(401).json({ erro: 'Cliente não encontrado' });
+    req.cliente = result.rows[0];
+    next();
+  } catch (err) {
+    res.status(401).json({ erro: 'Token inválido' });
   }
-});
-
-
+};
 
 // ==================== ROTA RAIZ ====================
 app.get('/', (req, res) => {
   res.json({
     mensagem: 'Queen Store API IMORTAL',
     status: '100% NO AR',
-    rainha: 'Wesley mandou!',
     data: new Date().toLocaleString('pt-BR')
   });
 });
 
-// ==================== LISTAR TODOS OS PRODUTOS ====================
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toLocaleString('pt-BR') });
+});
+
+// ==================== PRODUTOS ====================
+
+// LISTAR TODOS
 app.get('/api/produtos', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM produtos ORDER BY id');
@@ -155,203 +193,38 @@ app.get('/api/produtos', async (req, res) => {
   }
 });
 
-// ==================== CARRINHO: LISTAR ITENS ====================
-app.get('/api/carrinho', async (req, res) => {
-  const sessionId = req.headers['x-session-id'|| req.headers['session']];  // ← aceita os dois nomes de header
-
-  if (!sessionId) return res.json([]);
-
+// BUSCAR UM PRODUTO
+app.get('/api/produtos/:id', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        c.id,
-        c.produto_id,
-        c.quantidade,
-        p.nome,
-        p.preco,
-        p.imagens,
-        p.estoque AS estoque_atual
-      FROM carrinho c
-      JOIN produtos p ON c.produto_id = p.id
-      WHERE c.sessao = $1          -- ← SEM ACENTO!!!
-      ORDER BY c.id
-    `, [sessionId]);
-
-    const itens = result.rows.map(item => ({
-      ...item,
-      imagem: item.imagens?.[0] || 'https://i.ibb.co/0jG4vK8/geleia-maracuja.jpg'
-    }));
-
-    res.json(itens);
+    const result = await pool.query('SELECT * FROM produtos WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ erro: 'Produto não encontrado' });
+    res.json(result.rows[0]);
   } catch (err) {
-    console.error('Erro ao carregar carrinho:', err);
-    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
-  }
-});
-
-// ==================== CARRINHO: ADICIONAR OU ATUALIZAR ====================
-app.post('/api/carrinho', async (req, res) => {
-  const { produto_id, quantidade = 1 } = req.body;
-  const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← exatamente o header do frontend
-
-  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
-  if (!produto_id) return res.status(400).json({ erro: 'Produto inválido' });
-
-  const produtoId = parseInt(produto_id);
-  const qtd = parseInt(quantidade);
-
-  if (qtd < 1) return res.status(400).json({ erro: 'Quantidade inválida' });
-
-  try {
-    const check = await pool.query('SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', [produtoId]);
-    if (check.rows.length === 0) return res.status(404).json({ erro: 'Produto não encontrado' });
-
-    const produto = check.rows[0];
-    if (produto.estoque < qtd) return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: produto.estoque });
-
-    await pool.query(`
-      INSERT INTO carrinho (sessao, produto_id, quantidade)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (sessao, produto_id) 
-      DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
-    `, [sessionId, produtoId, qtd]);
-
-    await pool.query('UPDATE produtos SET estoque = estoque - $1 WHERE id = $2', [qtd, produtoId]);
-
-    res.json({ sucesso: true, mensagem: `\( {qtd} × \){produto.nome} adicionado(s)!` });
-  } catch (err) {
-    console.error('Erro no POST carrinho:', err);
-    res.status(500).json({ erro: 'Erro interno' });
-  }
-});
-
-
-// ==================== CARRINHO: ATUALIZAR QUANTIDADE (+ / -) ====================
-app.put('/api/carrinho/:produto_id', async (req, res) => {
-  try {
-    const produto_id = parseInt(req.params.produto_id);
-    const { quantidade } = req.body;
-    const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← MESMO HEADER!!!
-
-    if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
-    if (quantidade === undefined || quantidade < 0) return res.status(400).json({ erro: 'Quantidade inválida' });
-
-    if (quantidade === 0) {
-      // Remove do carrinho
-      const item = await pool.query('SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
-      if (item.rows.length > 0) {
-        await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [item.rows[0].quantidade, produto_id]);
-      }
-      await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
-      return res.json({ sucesso: true });
-    }
-
-    // Atualiza quantidade
-    const result = await pool.query(
-      'UPDATE carrinho SET quantidade = $1 WHERE sessao = $2 AND produto_id = $3 RETURNING *',
-      [quantidade, sessionId, produto_id]
-    );
-
-    if (result.rowCount === 0) return res.status(404).json({ erro: 'Item não encontrado' });
-
-    res.json({ sucesso: true });
-  } catch (err) {
-    console.error('ERRO NO PUT CARRINHO:', err);
-    res.status(500).json({ erro: 'Erro interno', detalhes: err.message });
-  }
-});
-
-
-// ==================== CARRINHO: REMOVER ITEM ====================
-app.delete('/api/carrinho/:produto_id', async (req, res) => {
-  const produto_id = parseInt(req.params.produto_id);
-  const sessionId = req.headers['x-session-id'] || req.headers['session'];  // ← MESMO HEADER!!!
-
-  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
-
-  try {
-    const item = await pool.query(
-      'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
-      [sessionId, produto_id]
-    );
-
-    if (item.rows.length === 0) return res.status(404).json({ erro: 'Item não encontrado' });
-    const quantidadeRemovida = item.rows[0].quantidade;
-
-    await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
-    await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [quantidadeRemovida, produto_id]);
-
-    res.json({ sucesso: true, mensagem: 'Removido do carrinho!' });
-  } catch (err) {
-    console.error('Erro ao remover do carrinho:', err);
-    res.status(500).json({ erro: 'Erro ao remover item' });
-  }
-});
-
-// ==================== EVITA "Cannot GET" NO NAVEGADOR ====================
-app.get('/api/carrinho/:produto_id', (req, res) => {
-  res.status(405).json({
-    erro: 'Método não permitido',
-    dica: 'Use DELETE para remover um item do carrinho',
-    metodo_correto: 'DELETE',
-    exemplo: `DELETE ${req.protocol}://${req.get('host')}/api/carrinho/${req.params.produto_id}`
-  });
-});
-
-// ==================== HEALTH CHECK ====================
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    mensagem: 'Queen Store API 100% viva e funcionando!',
-    timestamp: new Date().toLocaleString('pt-BR'),
-    rainha: 'Wesley, porra do caralho!!!'
-  });
-});
-
-// ==================== LISTAR CATEGORIAS DO BANCO ====================
-app.get('/api/categorias', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT DISTINCT categoria 
-      FROM produtos 
-      WHERE categoria IS NOT NULL AND categoria != ''
-      ORDER BY categoria
-    `);
-    const categorias = result.rows.map(row => row.categoria);
-    res.json(categorias);
-  } catch (err) {
-    console.error('Erro ao carregar categorias:', err);
     res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// ==================== CADASTRAR PRODUTO NOVO (ADMIN) ====================
-app.post('/api/produtos', async (req, res) => {
-  // Verifica se é admin (pode melhorar depois com token)
-  const sessionId = req.headers['x-session-id'];
-  if (!sessionId || !sessionId.includes('admin')) {
-    return res.status(403).json({ erro: 'Acesso negado' });
-  }
-
-  const {
-    nome,
-    preco,
-    estoque,
-    categoria,
-    descricao,
-    ingredientes,
-    frase_promocional,
-    imagens = [],
-    badge,
-    video_url
-  } = req.body;
-
-  // Validações básicas
-  if (!nome || !preco || !categoria) {
-    return res.status(400).json({ erro: 'Nome, preço e categoria são obrigatórios' });
-  }
-
+// CADASTRAR PRODUTO COM UPLOAD DE IMAGENS ← rota única, sem duplicata
+app.post('/api/produtos', upload.array('imagens', 4), async (req, res) => {
   try {
+    const {
+      nome, preco, estoque, categoria,
+      descricao, ingredientes, frase_promocional, badge, video_url
+    } = req.body;
+
+    if (!nome || !preco || !categoria) {
+      return res.status(400).json({ erro: 'Nome, preço e categoria são obrigatórios' });
+    }
+
+    // Faz upload das imagens pro Drive e coleta os links
+    const imagensLinks = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const link = await uploadToDrive(file.path, file.originalname, file.mimetype);
+        imagensLinks.push(link);
+      }
+    }
+
     const result = await pool.query(`
       INSERT INTO produtos (
         nome, preco, estoque, categoria, descricao, ingredientes,
@@ -366,212 +239,24 @@ app.post('/api/produtos', async (req, res) => {
       descricao?.trim() || null,
       ingredientes?.trim() || null,
       frase_promocional?.trim() || null,
-      imagens.filter(url => url.trim() !== ''),
+      imagensLinks,
       badge?.trim() || null,
       video_url?.trim() || null
     ]);
 
-    res.json({
+    res.status(201).json({
       sucesso: true,
-      mensagem: `Produto "${nome}" cadastrado com sucesso! ID: ${result.rows[0].id}`,
-      id: result.rows[0].id
+      mensagem: `Produto "${nome}" cadastrado com sucesso!`,
+      id: result.rows[0].id,
+      imagens: imagensLinks
     });
-
   } catch (err) {
-    console.error('ERRO AO CADASTRAR PRODUTO:', err);
+    console.error('Erro ao cadastrar produto:', err);
     res.status(500).json({ erro: 'Erro ao cadastrar produto', detalhe: err.message });
   }
 });
-// ==================== ADMIN — ESTOQUE ====================
-app.patch('/api/produtos/:id/estoque', async (req, res) => {
-  const { id } = req.params;
-  const { estoque } = req.body;
 
-  if (estoque === undefined || estoque < 0) {
-    return res.status(400).json({ erro: 'Estoque inválido' });
-  }
-
-  try {
-    await pool.query('UPDATE produtos SET estoque = $1 WHERE id = $2', [estoque, id]);
-    res.json({ sucesso: true });
-  } catch (err) {
-    console.error('Erro ao atualizar estoque:', err);
-    res.status(500).json({ erro: 'Erro no servidor' });
-  }
-});
-
-app.delete('/api/produtos/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    await pool.query('DELETE FROM produtos WHERE id = $1', [id]);
-    res.json({ sucesso: true });
-  } catch (err) {
-    console.error('Erro ao deletar produto:', err);
-    res.status(500).json({ erro: 'Erro no servidor' });
-  }
-});
-
-// ==================== ADMIN — DASHBOARD ====================
-// 1. Pedidos pendentes
-app.get('/api/admin/pedidos-pendentes', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT COUNT(*) as total 
-      FROM pedidos 
-      WHERE status IN ('pendente', 'pago') OR status IS NULL
-    `);
-    res.json({ total: parseInt(result.rows[0]?.total) || 0 });
-  } catch (err) {
-    console.error('Erro pedidos pendentes:', err);
-    res.json({ total: 0 });
-  }
-});
-
-// 2. Produtos com estoque baixo
-app.get('/api/admin/estoque-baixo', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT COUNT(*) as total 
-      FROM produtos 
-      WHERE estoque > 0 AND estoque <= 5
-    `);
-    res.json({ total: parseInt(result.rows[0].total) || 0 });
-  } catch (err) {
-    console.error('Erro estoque baixo:', err);
-    res.json({ total: 0 });
-  }
-});
-
-// 3. Faturamento do dia (soma tudo por enquanto)
-app.get('/api/admin/faturamento-hoje', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT COALESCE(SUM(c.quantidade * p.preco), 0) as total
-      FROM carrinho c
-      JOIN produtos p ON c.produto_id = p.id
-    `);
-    res.json({ total: parseFloat(result.rows[0].total) || 0 });
-  } catch (err) {
-    console.error('Erro faturamento:', err);
-    res.json({ total: 0 });
-  }
-});
-
-// ==================== PEDIDOS ====================
-// Listar todos os pedidos (admin)
-app.get('/api/admin/pedidos', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM pedidos ORDER BY criado_em DESC');
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Erro ao carregar pedidos:', err);
-    res.status(500).json({ erro: 'Erro no servidor' });
-  }
-});
-
-app.patch('/api/pedidos/:id', async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-
-  const statusValidos = ['pendente', 'pago', 'enviado', 'entregue', 'concluido'];
-  if (!statusValidos.includes(status)) {
-    return res.status(400).json({ erro: 'Status inválido' });
-  }
-
-  try {
-    // Atualiza no banco
-    await pool.query(
-      'UPDATE pedidos SET status = $1, atualizado_em = NOW() WHERE id = $2',
-      [status, id]
-    );
-
-    // BUSCA O PEDIDO PRA PEGAR EMAIL E NOME
-    const result = await pool.query('SELECT * FROM pedidos WHERE id = $1', [id]);
-    const pedido = result.rows[0];
-
-    // ENVIA EMAIL AUTOMÁTICO
-    if (['pago', 'enviado', 'entregue', 'concluido'].includes(status)) {
-      enviarEmailStatus(pedido.cliente_email, pedido.cliente_nome, pedido.id, status);
-    }
-
-    res.json({ sucesso: true });
-  } catch (err) {
-    console.error('Erro ao atualizar:', err);
-    res.status(500).json({ erro: 'Erro no servidor' });
-  }
-});
-
-// SALVAR PEDIDO COM EMAIL DE CONFIRMAÇÃO
-app.post('/api/pedidos', async (req, res) => {
-  console.log('PEDIDO RECEBIDO:', req.body);
-
-  const { 
-    cliente_nome = "Cliente via WhatsApp", 
-    cliente_whatsapp = "Não informado", 
-    cliente_email = "Não informado",
-    itens = [], 
-    valor_total = 0 
-  } = req.body;
-
-  if (itens.length === 0 || !valor_total) {
-    return res.status(400).json({ erro: 'Carrinho vazio' });
-  }
-
-  try {
-    // 1. SALVA O PEDIDO NO BANCO
-    const result = await pool.query(`
-      INSERT INTO pedidos (
-        cliente_nome, cliente_whatsapp, cliente_email, itens, valor_total, status,
-        criado_em
-      ) VALUES (
-        $1, $2, $3, $4, $5, 'pendente', NOW()
-      )
-      RETURNING id
-    `, [cliente_nome, cliente_whatsapp, cliente_email, JSON.stringify(itens), valor_total]);
-
-    const pedidoId = result.rows[0].id;
-
-    // 2. ENVIA EMAIL DE CONFIRMAÇÃO (se email informado)
-    if (cliente_email !== 'Não informado' && cliente_email.includes('@')) {
-      const sendSmtpEmail = {
-        to: [{ email: cliente_email, name: cliente_nome }],
-        sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
-        subject: `Confirmação de Pedido #${pedidoId} - Queen Store 💜`,
-        htmlContent: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
-            <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
-            <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${cliente_nome}</strong>!</p>
-            <h2 style="font-size: 32px; color: #8B00D7;">Seu pedido foi recebido!</h2>
-            <p style="font-size: 28px; color: #0F1B3F; font-weight: bold;">Pedido #${pedidoId}</p>
-            <p style="font-size: 18px; color: #0F1B3F; margin-top: 20px;">
-              Itens: <br>${itens.map(i => `${i.nome} × ${i.quantidade} - R$ ${(i.preco * i.quantidade).toFixed(2)}`).join('<br>')}
-            </p>
-            <p style="font-size: 24px; color: #0F1B3F; font-weight: bold; margin-top: 20px;">
-              Total: R$ ${valor_total.toFixed(2)}
-            </p>
-            <p style="font-size: 18px; color: #0F1B3F; margin-top: 40px;">
-              Em breve te avisamos o status! Qualquer dúvida, responde esse email ou chama no WhatsApp: (31) 97255-2077
-            </p>
-            <p style="color: #8B00D7; font-size: 22px; margin-top: 40px;">Com carinho,<br><strong>Queen Store</strong></p>
-          </div>
-        `
-      };
-
-      await apiInstance.sendTransacEmail(sendSmtpEmail);
-      console.log(`EMAIL DE CONFIRMAÇÃO ENVIADO → ${cliente_email} | Pedido #${pedidoId}`);
-    } else {
-      console.log('Email não informado, pulando envio');
-    }
-
-    res.json({ sucesso: true, pedido_id: pedidoId });
-
-  } catch (err) {
-    console.error('ERRO SALVANDO PEDIDO:', err);
-    res.status(500).json({ erro: 'Erro no banco', detalhe: err.message });
-  }
-});
-
-// EDITAR PRODUTO COMPLETO
+// EDITAR PRODUTO (campos texto)
 app.patch('/api/produtos/:id', async (req, res) => {
   const { id } = req.params;
   const campos = req.body;
@@ -592,321 +277,227 @@ app.patch('/api/produtos/:id', async (req, res) => {
   if (updates.length === 0) return res.status(400).json({ erro: 'Nenhum campo para atualizar' });
 
   values.push(id);
-  const query = `UPDATE produtos SET ${updates.join(', ')}, atualizado_em = NOW() WHERE id = $${index}`;
-
-  pool.query(query, values)
-    .then(() => res.json({ sucesso: true }))
-    .catch(err => {
-      console.error('Erro ao editar produto:', err);
-      res.status(500).json({ erro: 'Erro no servidor' });
-    });
-});
-
-// REENVIO DE EMAIL DE VERIFICAÇÃO
-app.post('/api/auth/resend-verification', async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ erro: 'Email obrigatório' });
-  }
+  // CORRIGIDO: removido atualizado_em (coluna não existe no banco)
+  const query = `UPDATE produtos SET ${updates.join(', ')} WHERE id = $${index}`;
 
   try {
-    const result = await pool.query(`
-      SELECT id, nome, is_verified 
-      FROM clientes 
-      WHERE email = $1
-    `, [email.toLowerCase()]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ erro: 'Email não encontrado' });
-    }
-
-    const user = result.rows[0];
-
-    if (user.is_verified) {
-      return res.status(400).json({ erro: 'Conta já verificada' });
-    }
-
-    // Novo token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
-
-    await pool.query(`
-      UPDATE clientes 
-      SET verification_token = $1, verification_expires = $2 
-      WHERE id = $3
-    `, [token, expires, user.id]);
-
-    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
-
-    const sendSmtpEmail = {
-      to: [{ email: email, name: user.nome }],
-      sender: { name: 'Queen Store', email: 'contato@queenstore.store' },
-      subject: 'Reenvio: Confirme sua conta Queen Store 💜',
-      htmlContent: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background: linear-gradient(#fdf2ff, #f8f0ff); border-radius: 20px; text-align: center;">
-          <h1 style="color: #0F1B3F; font-size: 36px;">Queen Store</h1>
-          <p style="color: #8B00D7; font-size: 22px;">Olá, <strong>${user.nome}</strong>!</p>
-          <h2 style="font-size: 32px; color: #8B00D7;">Reenvio de Confirmação</h2>
-          <p style="font-size: 20px; color: #0F1B3F;">Clique abaixo para confirmar sua conta:</p>
-          <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;margin:20px 0;">
-            Confirmar Conta Agora
-          </a>
-          <p style="font-size: 16px; color: #0F1B3F;">Se o botão não funcionar, copie: ${verifyLink}</p>
-          <p style="font-size: 16px; color: #0F1B3F;">Link expira em 24 horas.</p>
-          <p style="color: #8B00D7; font-size: 22px;">Com carinho,<br><strong>Queen Store</strong></p>
-        </div>
-      `
-    };
-
-    await apiInstance.sendTransacEmail(sendSmtpEmail);
-
-    res.json({ sucesso: true, mensagem: 'Email de confirmação reenviado!' });
+    await pool.query(query, values);
+    res.json({ sucesso: true });
   } catch (err) {
-    console.error('Erro Brevo reenvio:', err);
-    res.status(500).json({ erro: 'Erro ao reenviar email' });
-  }
-});
-
-// LOGIN (EMAIL + SENHA)
-app.post('/api/auth/login', async (req, res) => {
-  const { email, senha } = req.body;
-
-  if (!email || !senha) {
-    return res.status(400).json({ erro: 'Email e senha obrigatórios' });
-  }
-
-  try {
-    const result = await pool.query('SELECT * FROM clientes WHERE email = $1', [email.toLowerCase()]);
-    if (result.rows.length === 0) {
-      return res.status(400).json({ erro: 'Email ou senha incorretos' });
-    }
-
-    const cliente = result.rows[0];
-
-    // Se logou só com Google, não tem senha
-    if (!cliente.senha_hash) {
-      return res.status(400).json({ erro: 'Essa conta usa login com Google' });
-    }
-
-    const senhaValida = await bcrypt.compare(senha, cliente.senha_hash);
-    if (!senhaValida) {
-      return res.status(400).json({ erro: 'Email ou senha incorretos' });
-    }
-
-    const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
-
-    res.json({ sucesso: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
-  } catch (err) {
-    console.error('Erro no login:', err);
+    console.error('Erro ao editar produto:', err);
     res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// LOGIN COM GOOGLE
-app.post('/api/auth/google', async (req, res) => {
-  const { token } = req.body; // token do Google vindo do frontend
+// ATUALIZAR ESTOQUE
+app.patch('/api/produtos/:id/estoque', async (req, res) => {
+  const { id } = req.params;
+  const { estoque } = req.body;
+
+  if (estoque === undefined || estoque < 0) {
+    return res.status(400).json({ erro: 'Estoque inválido' });
+  }
 
   try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken: token,
-      audience: process.env.REACT_APP_GOOGLE_CLIENT_ID
-    });
-
-    const payload = ticket.getPayload();
-    const googleId = payload['sub'];
-    const email = payload['email'];
-    const nome = payload['name'] || email.split('@')[0];
-
-    // Busca ou cria cliente
-    let result = await pool.query('SELECT * FROM clientes WHERE google_id = $1 OR email = $2', [googleId, email]);
-    let cliente = result.rows[0];
-
-    if (!cliente) {
-      // Cria novo cliente
-      result = await pool.query(`
-        INSERT INTO clientes (nome, email, google_id)
-        VALUES ($1, $2, $3)
-        RETURNING id, nome, email
-      `, [nome, email, googleId]);
-
-      cliente = result.rows[0];
-    } else if (!cliente.google_id) {
-      // Vincula Google à conta existente
-      await pool.query('UPDATE clientes SET google_id = $1 WHERE id = $2', [googleId, cliente.id]);
-      cliente.google_id = googleId;
-    }
-
-    const jwtToken = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
-
-    res.json({ sucesso: true, token: jwtToken, cliente: { id: cliente.id, nome: cliente.nome || nome, email: cliente.email || email }});
+    await pool.query('UPDATE produtos SET estoque = $1 WHERE id = $2', [estoque, id]);
+    res.json({ sucesso: true });
   } catch (err) {
-    console.error('Erro login Google:', err);
-    res.status(400).json({ erro: 'Token Google inválido' });
+    console.error('Erro ao atualizar estoque:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// MIDDLEWARE PRA PROTEGER ROTAS
-const autenticar = async (req, res, next) => {
-  const token = req.headers.authorization?.split('Bearer ')[1];
-
-  if (!token) {
-    return res.status(401).json({ erro: 'Token não fornecido' });
-  }
-
+// DELETAR PRODUTO
+app.delete('/api/produtos/:id', async (req, res) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const result = await pool.query('SELECT id, nome, email FROM clientes WHERE id = $1', [decoded.clienteId]);
-    if (result.rows.length === 0) {
-      return res.status(401).json({ erro: 'Cliente não encontrado' });
-    }
-
-    req.cliente = result.rows[0];
-    next();
+    await pool.query('DELETE FROM produtos WHERE id = $1', [req.params.id]);
+    res.json({ sucesso: true });
   } catch (err) {
-    res.status(401).json({ erro: 'Token inválido' });
+    console.error('Erro ao deletar produto:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
   }
-};
+});
 
-// EXEMPLO DE ROTA PROTEGIDA — HISTÓRICO DE PEDIDOS DO CLIENTE
-app.get('/api/clientes/pedidos', autenticar, async (req, res) => {
+// ==================== CATEGORIAS ====================
+app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM pedidos 
-      WHERE cliente_email = $1 OR cliente_whatsapp = $2
-      ORDER BY criado_em DESC
-    `, [req.cliente.email, req.cliente.whatsapp || '']);
-
-    res.json(result.rows);
+      SELECT DISTINCT categoria FROM produtos
+      WHERE categoria IS NOT NULL AND categoria != ''
+      ORDER BY categoria
+    `);
+    res.json(result.rows.map(row => row.categoria));
   } catch (err) {
-    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+    res.status(500).json({ erro: 'Erro no servidor' });
   }
 });
 
-// ROTA PRA PEGAR DADOS DO CLIENTE LOGADO
-app.get('/api/clientes/perfil', autenticar, async (req, res) => {
-  res.json({ cliente: req.cliente });
-});
-
-// ATUALIZAR CADASTRO (NOME E EMAIL BLOQUEADOS)
-app.patch('/api/clientes/atualizar', autenticar, async (req, res) => {
-  const { whatsapp, enderecos, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
-
-  if (senha && senha !== senha_confirm) {
-    return res.status(400).json({ erro: 'Senhas não coincidem' });
-  }
+// ==================== CARRINHO ====================
+app.get('/api/carrinho', async (req, res) => {
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];
+  if (!sessionId) return res.json([]);
 
   try {
-    let query = 'UPDATE clientes SET ';
-    const values = [];
-    let paramIndex = 1;
+    const result = await pool.query(`
+      SELECT c.id, c.produto_id, c.quantidade,
+             p.nome, p.preco, p.imagens, p.estoque AS estoque_atual
+      FROM carrinho c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE c.sessao = $1
+      ORDER BY c.id
+    `, [sessionId]);
 
-    if (whatsapp !== undefined) {
-      query += `whatsapp = $${paramIndex}, `;
-      values.push(whatsapp);
-      paramIndex++;
-    }
-    if (enderecos !== undefined) {
-      query += `enderecos = $${paramIndex}, `;
-      values.push(enderecos);
-      paramIndex++;
-    }
-    if (cidade !== undefined) {
-      query += `cidade = $${paramIndex}, `;
-      values.push(cidade);
-      paramIndex++;
-    }
-    if (estado !== undefined) {
-      query += `estado = $${paramIndex}, `;
-      values.push(estado);
-      paramIndex++;
-    }
-    if (cep !== undefined) {
-      query += `cep = $${paramIndex}, `;
-      values.push(cep);
-      paramIndex++;
-    }
-    if (complemento !== undefined) {
-      query += `complemento = $${paramIndex}, `;
-      values.push(complemento);
-      paramIndex++;
-    }
-    if (senha) {
-      const senhaHash = await bcrypt.hash(senha, 10);
-      query += `senha_hash = $${paramIndex}, `;
-      values.push(senhaHash);
-      paramIndex++;
-    }
+    const itens = result.rows.map(item => ({
+      ...item,
+      imagem: item.imagens?.[0] || null
+    }));
 
-    // Remove vírgula extra
-    query = query.replace(/, $/, '');
-
-    query += ` WHERE id = $${paramIndex}`;
-    values.push(req.cliente.id);
-
-    await pool.query(query, values);
-
-    res.json({ sucesso: true, mensagem: 'Cadastro atualizado com sucesso!' });
+    res.json(itens);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ erro: 'Erro ao atualizar cadastro' });
+    console.error('Erro ao carregar carrinho:', err);
+    res.status(500).json({ erro: 'Erro ao carregar carrinho' });
   }
 });
 
-// REGISTRO (adapta tua rota /api/auth/register)
+app.post('/api/carrinho', async (req, res) => {
+  const { produto_id, quantidade = 1 } = req.body;
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];
+
+  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
+  if (!produto_id) return res.status(400).json({ erro: 'Produto inválido' });
+
+  const produtoId = parseInt(produto_id);
+  const qtd = parseInt(quantidade);
+  if (qtd < 1) return res.status(400).json({ erro: 'Quantidade inválida' });
+
+  try {
+    const check = await pool.query('SELECT estoque, nome FROM produtos WHERE id = $1 FOR UPDATE', [produtoId]);
+    if (check.rows.length === 0) return res.status(404).json({ erro: 'Produto não encontrado' });
+
+    const produto = check.rows[0];
+    if (produto.estoque < qtd) return res.status(400).json({ erro: 'Estoque insuficiente', disponivel: produto.estoque });
+
+    await pool.query(`
+      INSERT INTO carrinho (sessao, produto_id, quantidade)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (sessao, produto_id)
+      DO UPDATE SET quantidade = carrinho.quantidade + EXCLUDED.quantidade
+    `, [sessionId, produtoId, qtd]);
+
+    await pool.query('UPDATE produtos SET estoque = estoque - $1 WHERE id = $2', [qtd, produtoId]);
+
+    res.json({ sucesso: true, mensagem: `${qtd} × ${produto.nome} adicionado(s)!` });
+  } catch (err) {
+    console.error('Erro no POST carrinho:', err);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+});
+
+app.put('/api/carrinho/:produto_id', async (req, res) => {
+  const produto_id = parseInt(req.params.produto_id);
+  const { quantidade } = req.body;
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];
+
+  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
+  if (quantidade === undefined || quantidade < 0) return res.status(400).json({ erro: 'Quantidade inválida' });
+
+  try {
+    if (quantidade === 0) {
+      const item = await pool.query('SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
+      if (item.rows.length > 0) {
+        await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [item.rows[0].quantidade, produto_id]);
+      }
+      await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
+      return res.json({ sucesso: true });
+    }
+
+    const result = await pool.query(
+      'UPDATE carrinho SET quantidade = $1 WHERE sessao = $2 AND produto_id = $3 RETURNING *',
+      [quantidade, sessionId, produto_id]
+    );
+
+    if (result.rowCount === 0) return res.status(404).json({ erro: 'Item não encontrado' });
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro no PUT carrinho:', err);
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+});
+
+app.delete('/api/carrinho/:produto_id', async (req, res) => {
+  const produto_id = parseInt(req.params.produto_id);
+  const sessionId = req.headers['x-session-id'] || req.headers['session'];
+
+  if (!sessionId) return res.status(400).json({ erro: 'Sessão não encontrada' });
+
+  try {
+    const item = await pool.query(
+      'SELECT quantidade FROM carrinho WHERE sessao = $1 AND produto_id = $2',
+      [sessionId, produto_id]
+    );
+
+    if (item.rows.length === 0) return res.status(404).json({ erro: 'Item não encontrado' });
+
+    await pool.query('DELETE FROM carrinho WHERE sessao = $1 AND produto_id = $2', [sessionId, produto_id]);
+    await pool.query('UPDATE produtos SET estoque = estoque + $1 WHERE id = $2', [item.rows[0].quantidade, produto_id]);
+
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro ao remover do carrinho:', err);
+    res.status(500).json({ erro: 'Erro ao remover item' });
+  }
+});
+
+app.get('/api/carrinho/:produto_id', (req, res) => {
+  res.status(405).json({ erro: 'Use DELETE para remover um item do carrinho' });
+});
+
+// ==================== AUTH ====================
+
+// REGISTRO
 app.post('/api/auth/register', async (req, res) => {
   const { nome, email, senha, whatsapp } = req.body;
 
-  // ... teu código de hash senha e insert ...
-
-  // Gera token único
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
-
-  await pool.query(`
-    UPDATE clientes 
-    SET verification_token = $1, verification_expires = $2, is_verified = false 
-    WHERE email = $3
-  `, [token, expires, email]);
-
-  // Link de verificação
-  const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
-
-  // Email bonito
-  await transporter.sendMail({
-    from: '"Queen Store" <seuemail@gmail.com>',
-    to: email,
-    subject: 'Confirme sua conta Queen Store 💜',
-    html: `
-      <h1>Olá, ${nome}! Bem-vinda à Queen Store 👑</h1>
-      <p>Clique no botão abaixo para confirmar sua conta e começar a comprar:</p>
-      <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;">Confirmar Conta</a>
-      <p>Se o botão não funcionar, copie o link: ${verifyLink}</p>
-      <p>O link expira em 24 horas.</p>
-      <p>Com amor, Queen Store 💜</p>
-    `
-  });
-
-  res.json({ sucesso: true, mensagem: 'Cadastro realizado! Confira seu email para confirmar a conta.' });
-});
-
-// ROTA DE VERIFICAÇÃO
-app.get('/api/auth/verify/:token', async (req, res) => {
-  const { token } = req.params;
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ erro: 'Nome, email e senha são obrigatórios' });
+  }
 
   try {
-    const result = await pool.query(`
-      SELECT * FROM clientes 
-      WHERE verification_token = $1 AND verification_expires > NOW()
-    `, [token]);
+    const existe = await pool.query('SELECT id FROM clientes WHERE email = $1', [email.toLowerCase()]);
+    if (existe.rows.length > 0) return res.status(400).json({ erro: 'Email já cadastrado' });
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({ erro: 'Token inválido ou expirado' });
-    }
+    const senhaHash = await bcrypt.hash(senha, 10);
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await pool.query(`
-      UPDATE clientes 
-      SET is_verified = true, verification_token = NULL, verification_expires = NULL 
+      INSERT INTO clientes (nome, email, senha_hash, whatsapp, verification_token, verification_expires, is_verified)
+      VALUES ($1, $2, $3, $4, $5, $6, false)
+    `, [nome.trim(), email.toLowerCase(), senhaHash, whatsapp || null, token, expires]);
+
+    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
+    await enviarEmail(email, nome, 'Confirme sua conta Queen Store 💜', emailVerificacaoConta(nome, verifyLink));
+
+    res.json({ sucesso: true, mensagem: 'Cadastro realizado! Confira seu email para confirmar a conta.' });
+  } catch (err) {
+    console.error('Erro no registro:', err);
+    res.status(500).json({ erro: 'Erro ao cadastrar', detalhe: err.message });
+  }
+});
+
+// VERIFICAR CONTA
+app.get('/api/auth/verify/:token', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM clientes
+      WHERE verification_token = $1 AND verification_expires > NOW()
+    `, [req.params.token]);
+
+    if (result.rows.length === 0) return res.status(400).json({ erro: 'Token inválido ou expirado' });
+
+    await pool.query(`
+      UPDATE clientes
+      SET is_verified = true, verification_token = NULL, verification_expires = NULL
       WHERE id = $1
     `, [result.rows[0].id]);
 
@@ -916,6 +507,298 @@ app.get('/api/auth/verify/:token', async (req, res) => {
   }
 });
 
+// REENVIAR VERIFICAÇÃO
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ erro: 'Email obrigatório' });
+
+  try {
+    const result = await pool.query('SELECT id, nome, is_verified FROM clientes WHERE email = $1', [email.toLowerCase()]);
+    if (result.rows.length === 0) return res.status(404).json({ erro: 'Email não encontrado' });
+
+    const user = result.rows[0];
+    if (user.is_verified) return res.status(400).json({ erro: 'Conta já verificada' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await pool.query(`
+      UPDATE clientes SET verification_token = $1, verification_expires = $2 WHERE id = $3
+    `, [token, expires, user.id]);
+
+    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
+    await enviarEmail(email, user.nome, 'Reenvio: Confirme sua conta Queen Store 💜', emailVerificacaoConta(user.nome, verifyLink));
+
+    res.json({ sucesso: true, mensagem: 'Email de confirmação reenviado!' });
+  } catch (err) {
+    console.error('Erro no reenvio:', err);
+    res.status(500).json({ erro: 'Erro ao reenviar email' });
+  }
+});
+
+// LOGIN
+app.post('/api/auth/login', async (req, res) => {
+  const { email, senha } = req.body;
+  if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
+
+  try {
+    const result = await pool.query('SELECT * FROM clientes WHERE email = $1', [email.toLowerCase()]);
+    if (result.rows.length === 0) return res.status(400).json({ erro: 'Email ou senha incorretos' });
+
+    const cliente = result.rows[0];
+
+    if (!cliente.senha_hash) return res.status(400).json({ erro: 'Essa conta usa login com Google' });
+
+    if (!cliente.is_verified) return res.status(403).json({ erro: 'Confirme sua conta pelo email antes de logar' });
+
+    const senhaValida = await bcrypt.compare(senha, cliente.senha_hash);
+    if (!senhaValida) return res.status(400).json({ erro: 'Email ou senha incorretos' });
+
+    const token = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ sucesso: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email } });
+  } catch (err) {
+    console.error('Erro no login:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+// LOGIN COM GOOGLE
+app.post('/api/auth/google', async (req, res) => {
+  const { token } = req.body;
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload['sub'];
+    const email = payload['email'];
+    const nome = payload['name'] || email.split('@')[0];
+
+    let result = await pool.query('SELECT * FROM clientes WHERE google_id = $1 OR email = $2', [googleId, email]);
+    let cliente = result.rows[0];
+
+    if (!cliente) {
+      result = await pool.query(`
+        INSERT INTO clientes (nome, email, google_id, is_verified)
+        VALUES ($1, $2, $3, true)
+        RETURNING id, nome, email
+      `, [nome, email, googleId]);
+      cliente = result.rows[0];
+    } else if (!cliente.google_id) {
+      await pool.query('UPDATE clientes SET google_id = $1, is_verified = true WHERE id = $2', [googleId, cliente.id]);
+    }
+
+    const jwtToken = jwt.sign({ clienteId: cliente.id }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ sucesso: true, token: jwtToken, cliente: { id: cliente.id, nome: cliente.nome || nome, email: cliente.email || email } });
+  } catch (err) {
+    console.error('Erro login Google:', err);
+    res.status(400).json({ erro: 'Token Google inválido' });
+  }
+});
+
+// ==================== CLIENTE ====================
+
+app.get('/api/clientes/perfil', autenticar, async (req, res) => {
+  res.json({ cliente: req.cliente });
+});
+
+app.get('/api/cliente/dados', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT nome, email, whatsapp, enderecos, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
+      [req.cliente.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ erro: 'Dados não encontrados' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro interno' });
+  }
+});
+
+app.get('/api/cliente/enderecos', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT whatsapp, enderecos, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
+      [req.cliente.id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar endereços' });
+  }
+});
+
+app.patch('/api/cliente/enderecos', autenticar, async (req, res) => {
+  const { whatsapp, enderecos, cidade, estado, cep, complemento } = req.body;
+  try {
+    await pool.query(`
+      UPDATE clientes SET
+        whatsapp = COALESCE($1, whatsapp),
+        enderecos = COALESCE($2, enderecos),
+        cidade = COALESCE($3, cidade),
+        estado = COALESCE($4, estado),
+        cep = COALESCE($5, cep),
+        complemento = COALESCE($6, complemento)
+      WHERE id = $7
+    `, [whatsapp || null, enderecos || null, cidade || null, estado || null, cep || null, complemento || null, req.cliente.id]);
+    res.json({ sucesso: true });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao salvar endereços' });
+  }
+});
+
+app.patch('/api/clientes/atualizar', autenticar, async (req, res) => {
+  const { whatsapp, enderecos, cidade, estado, cep, complemento, senha, senha_confirm } = req.body;
+
+  if (senha && senha !== senha_confirm) return res.status(400).json({ erro: 'Senhas não coincidem' });
+
+  try {
+    const fields = [];
+    const values = [];
+    let i = 1;
+
+    const add = (col, val) => { fields.push(`${col} = $${i++}`); values.push(val); };
+
+    if (whatsapp !== undefined) add('whatsapp', whatsapp);
+    if (enderecos !== undefined) add('enderecos', enderecos);
+    if (cidade !== undefined) add('cidade', cidade);
+    if (estado !== undefined) add('estado', estado);
+    if (cep !== undefined) add('cep', cep);
+    if (complemento !== undefined) add('complemento', complemento);
+    if (senha) add('senha_hash', await bcrypt.hash(senha, 10));
+
+    if (fields.length === 0) return res.status(400).json({ erro: 'Nada para atualizar' });
+
+    values.push(req.cliente.id);
+    await pool.query(`UPDATE clientes SET ${fields.join(', ')} WHERE id = $${i}`, values);
+    res.json({ sucesso: true });
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao atualizar cadastro' });
+  }
+});
+
+app.get('/api/clientes/pedidos', autenticar, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM pedidos WHERE cliente_email = $1 ORDER BY criado_em DESC',
+      [req.cliente.email]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao carregar pedidos' });
+  }
+});
+
+// ==================== PEDIDOS ====================
+
+app.post('/api/pedidos', async (req, res) => {
+  const {
+    cliente_nome = 'Cliente',
+    cliente_whatsapp = 'Não informado',
+    cliente_email = 'Não informado',
+    itens = [],
+    valor_total = 0
+  } = req.body;
+
+  if (itens.length === 0 || !valor_total) return res.status(400).json({ erro: 'Carrinho vazio' });
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO pedidos (cliente_nome, cliente_whatsapp, cliente_email, itens, valor_total, status, criado_em)
+      VALUES ($1, $2, $3, $4, $5, 'pendente', NOW())
+      RETURNING id
+    `, [cliente_nome, cliente_whatsapp, cliente_email, JSON.stringify(itens), valor_total]);
+
+    const pedidoId = result.rows[0].id;
+
+    if (cliente_email !== 'Não informado' && cliente_email.includes('@')) {
+      await enviarEmail(
+        cliente_email, cliente_nome,
+        `Confirmação de Pedido #${pedidoId} - Queen Store 💜`,
+        emailConfirmacaoPedido(cliente_nome, pedidoId, itens, valor_total)
+      );
+    }
+
+    res.json({ sucesso: true, pedido_id: pedidoId });
+  } catch (err) {
+    console.error('Erro salvando pedido:', err);
+    res.status(500).json({ erro: 'Erro no banco', detalhe: err.message });
+  }
+});
+
+app.get('/api/admin/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pedidos ORDER BY criado_em DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+app.patch('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const statusValidos = ['pendente', 'pago', 'enviado', 'entregue', 'concluido'];
+  if (!statusValidos.includes(status)) return res.status(400).json({ erro: 'Status inválido' });
+
+  try {
+    await pool.query('UPDATE pedidos SET status = $1 WHERE id = $2', [status, id]);
+
+    const result = await pool.query('SELECT * FROM pedidos WHERE id = $1', [id]);
+    const pedido = result.rows[0];
+
+    if (['pago', 'enviado', 'entregue', 'concluido'].includes(status) && pedido.cliente_email?.includes('@')) {
+      await enviarEmail(
+        pedido.cliente_email, pedido.cliente_nome,
+        `Atualização do Pedido #${id} - Queen Store`,
+        emailStatusPedido(pedido.cliente_nome, id, status)
+      );
+    }
+
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro ao atualizar pedido:', err);
+    res.status(500).json({ erro: 'Erro no servidor' });
+  }
+});
+
+// ==================== ADMIN DASHBOARD ====================
+
+app.get('/api/admin/pedidos-pendentes', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT COUNT(*) as total FROM pedidos WHERE status IN ('pendente', 'pago') OR status IS NULL`);
+    res.json({ total: parseInt(result.rows[0].total) || 0 });
+  } catch (err) {
+    res.json({ total: 0 });
+  }
+});
+
+app.get('/api/admin/estoque-baixo', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT COUNT(*) as total FROM produtos WHERE estoque > 0 AND estoque <= 5`);
+    res.json({ total: parseInt(result.rows[0].total) || 0 });
+  } catch (err) {
+    res.json({ total: 0 });
+  }
+});
+
+app.get('/api/admin/faturamento-hoje', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT COALESCE(SUM(valor_total), 0) as total
+      FROM pedidos
+      WHERE DATE(criado_em) = CURRENT_DATE AND status != 'pendente'
+    `);
+    res.json({ total: parseFloat(result.rows[0].total) || 0 });
+  } catch (err) {
+    res.json({ total: 0 });
+  }
+});
+
+// ==================== DESEJOS ====================
 app.get('/api/desejos', autenticar, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -929,142 +812,12 @@ app.get('/api/desejos', autenticar, async (req, res) => {
   }
 });
 
-// BLOQUEIA LOGIN SE NÃO VERIFICADO (adapta tua rota de login)
-app.post('/api/auth/login', async (req, res) => {
-  // ... teu código de login ...
-
-  if (!cliente.is_verified) {
-    return res.status(403).json({ erro: 'Confirme sua conta pelo email antes de logar' });
-  }
-
-  // ... gera token e responde ...
-});
-
-// REENVIAR EMAIL DE VERIFICAÇÃO
-app.post('/api/auth/resend-verification', async (req, res) => {
-  const { email } = req.body;
-
-  try {
-    const result = await pool.query('SELECT id, nome, is_verified FROM clientes WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ erro: 'Email não encontrado' });
-    }
-
-    const user = result.rows[0];
-    if (user.is_verified) {
-      return res.status(400).json({ erro: 'Conta já verificada' });
-    }
-
-    // Gera novo token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    await pool.query(`
-      UPDATE clientes 
-      SET verification_token = $1, verification_expires = $2 
-      WHERE id = $3
-    `, [token, expires, user.id]);
-
-    const verifyLink = `https://queen-store-frontend.vercel.app/verify/${token}`;
-
-    // Envia email novo
-    await transporter.sendMail({
-      from: '"Queen Store" <seuemail@gmail.com>',
-      to: email,
-      subject: 'Reenvio: Confirme sua conta Queen Store 💜',
-      html: `
-        <h1>Olá, ${user.nome}! 👑</h1>
-        <p>Você pediu para reenviar o email de confirmação.</p>
-        <p>Clique abaixo para ativar sua conta:</p>
-        <a href="${verifyLink}" style="background:#0F1B3F;color:white;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:bold;">Confirmar Conta Agora</a>
-        <p>Se o botão não funcionar: ${verifyLink}</p>
-        <p>O link expira em 24 horas.</p>
-        <p>Com amor, Queen Store 💜</p>
-      `
-    });
-
-    res.json({ sucesso: true, mensagem: 'Email de confirmação reenviado!' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ erro: 'Erro ao reenviar email' });
-  }
-});
-
-// ==================== MÚLTIPLOS ENDEREÇOS ====================
-// GET — CARREGA ENDEREÇOS DO CLIENTE (plural)
-app.get('/api/cliente/enderecos', autenticar, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT whatsapp, enderecos, cidade, estado, cep, complemento 
-      FROM clientes 
-      WHERE id = $1
-    `, [req.cliente.id]);
-    res.json(result.rows[0] || {});
-  } catch (err) {
-    console.error('Erro ao carregar endereços:', err);
-    res.status(500).json({ erro: 'Erro ao carregar endereços' });
-  }
-});
-
-// PATCH — SALVA/ATUALIZA ENDEREÇOS DO CLIENTE (plural)
-app.patch('/api/cliente/enderecos', autenticar, async (req, res) => {
-  const { whatsapp, enderecos, cidade, estado, cep, complemento } = req.body;
-
-  try {
-    await pool.query(`
-      UPDATE clientes 
-      SET 
-        whatsapp = COALESCE($1, whatsapp),
-        enderecos = COALESCE($2, enderecos),
-        cidade = COALESCE($3, cidade),
-        estado = COALESCE($4, estado),
-        cep = COALESCE($5, cep),
-        complemento = COALESCE($6, complemento)
-      WHERE id = $7
-    `, [
-      whatsapp || null,
-      enderecos || null,
-      cidade || null,
-      estado || null,
-      cep || null,
-      complemento || null,
-      req.cliente.id
-    ]);
-
-    res.json({ sucesso: true, mensagem: 'Endereços atualizados!' });
-  } catch (err) {
-    console.error('Erro ao atualizar endereços:', err);
-    res.status(500).json({ erro: 'Erro ao salvar endereços' });
-  }
-});
-
-// GET - Dados do cliente logado (endereços, whatsapp, etc)
-app.get('/api/cliente/dados', autenticar, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT nome, email, whatsapp, enderecos, cidade, estado, cep, complemento FROM clientes WHERE id = $1',
-      [req.cliente.id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ erro: 'Dados não encontrados' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Erro ao buscar dados do cliente:', err);
-    res.status(500).json({ erro: 'Erro interno' });
-  }
-});
-
-// ==================== INICIA O SERVIDOR ====================
+// ==================== INICIA SERVIDOR ====================
 const PORT = process.env.PORT || 8080;
-
 app.listen(PORT, () => {
   console.log('================================================');
-  console.log('    QUEEN STORE API RODANDO COM SUCESSO!    ');
-  console.log(`    Porta: ${PORT}                                 `);
-  console.log(`    URL: https://queen-store-api.onrender.com   `);
-  console.log('    A RAINHA ESTÁ NO AR E NÃO SAI MAIS!      ');
+  console.log('    QUEEN STORE API RODANDO COM SUCESSO!        ');
+  console.log(`    Porta: ${PORT}                              `);
+  console.log('    A RAINHA ESTÁ NO AR E NÃO SAI MAIS!        ');
   console.log('================================================');
 });
